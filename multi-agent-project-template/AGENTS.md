@@ -7,8 +7,8 @@
 ## 角色配置
 
 - Product：`.codex/agents/product.toml`，负责需求范围、业务规则、权限边界、API/数据契约和验收标准。
-- Frontend：`.codex/agents/frontend.toml`，负责 Vue 前端页面、交互、类型、路由和接口对接。
-- Backend：`.codex/agents/backend.toml`，负责 Java Spring Boot/Spring Cloud 接口、权限、事务、数据访问和测试。
+- Frontend：`.codex/agents/frontend.toml`，按项目技术档案和实际依赖负责前端页面、交互、类型、路由和接口对接。
+- Backend：`.codex/agents/backend.toml`，按项目技术档案和实际依赖负责 Java 后端接口、权限、事务、数据访问和测试。
 - Tester：`.codex/agents/tester.toml`，负责契约审查、风险分析和验证结果。
 - RepoOps：`.codex/agents/repoops.toml`，仅负责 Git/GitHub/SVN 的仓库状态、拉取、提交、推送、分支和标签操作。
 
