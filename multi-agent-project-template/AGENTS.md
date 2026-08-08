@@ -27,6 +27,8 @@
 - RepoOps 只有在用户后续命令同时包含版本控制关键词和明确动作时才执行对应写操作。例如“git 提交”“github 推送”“svn update”；不得因“代码改好了”“查看 Git 状态”或单独出现“GitHub”等请求自动提交、推送或拉取。
 - `git push --force`、`git reset --hard`、`git clean`、变基、删除分支或标签、覆盖远端历史、SVN 回滚/删除等高风险操作，必须在展示目标和影响后取得用户二次明确确认。
 - 认证只能使用 Git Credential Manager、SSH 或安全存储的个人访问令牌；不得将账号密码、Token 或密钥写入项目文件、Git 配置、远端 URL 或提交历史。
+- 远端拉取或推送失败时，RepoOps 可自动收集 Git 错误、DNS 解析、443 端口连通性、有效 Git/环境代理设置及现有 hosts 记录，并在没有远端分叉时重试一次普通操作。
+- RepoOps 不得根据 ping 或 DNS 结果自动新增、修改或删除 Windows hosts 中的 GitHub 映射。GitHub IP 会变化，且 DNS/ICMP 成功不能证明 HTTPS 或代理可用；如确需修改 hosts，必须由用户在单独命令中明确确认准确域名、IP 和影响范围。
 
 ## 强制流程
 
