@@ -1,5 +1,7 @@
 # 多 Agent 协同规则
 
+> 通用模板补充规则：本文件后续“项目技术档案与模板同步”章节优先于任何固定 Vue 或 Spring Cloud 默认描述。
+
 除“版本控制快速通道”外，协调 Agent 必须先按“协同分级路由”判断参与角色和验证深度。不得把低风险任务升级为全量协同，也不得把功能、安全或运行时变更降级后直接交付。
 
 ## 角色配置
@@ -122,4 +124,10 @@ Product 必须在影响矩阵中声明 `runtime_behavior_changed`、`restart_fro
 - `.codex/config.toml`
 - `.codex/agents/*.toml`
 
-可运行 `multi-agent-project-template/sync-from-project.ps1` 执行同步。不得同步 `TEST_ACCOUNTS.md`、`.env`、本地数据库配置或其他包含凭据的 Markdown/TOML 文件。
+仅维护本仓库内 `multi-agent-project-template` 模板副本时，可运行 `multi-agent-project-template/sync-from-project.ps1` 执行默认同步。目标项目只复制 `AGENTS.md`、`.codex` 和 `PROJECT_PROFILE.md` 时不包含该脚本，必须忽略本节同步命令。`.codex/config.toml` 默认不同步；仅在明确执行 `-IncludeConfig`，并确认源文件不含本地网络、模型、代理、凭据或其他环境项时才可同步。不得同步 `TEST_ACCOUNTS.md`、`.env`、本地数据库配置、`PROJECT_PROFILE.md` 或其他包含凭据的 Markdown/TOML 文件。
+
+## 项目技术档案与模板同步
+
+协同开始时优先读取项目根目录的 `PROJECT_PROFILE.md`。它记录后端框架、构建工具、模块路径、可选前端技术栈、数据库和常用测试命令，不得包含账号、密码、Token、代理或生产地址。
+
+若档案不存在或字段缺失，Product 和实施角色必须从 `pom.xml`、`build.gradle`、模块目录、`package.json` 和现有脚本探测实际技术栈；不得因通用模板默认值而初始化 Vue、Spring Cloud 或新增依赖。未经用户明确授权，不得替换既有框架、构建工具、模块边界、数据库类型、主要依赖或部署拓扑。技术档案只影响路由和实现方式，不改变 L0-L3 分级与风险升级规则。

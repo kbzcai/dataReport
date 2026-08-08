@@ -1,13 +1,20 @@
+param(
+    [switch]$IncludeConfig
+)
+
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $relativeFiles = @(
     'AGENTS.md',
-    '.codex\config.toml',
     '.codex\agents\product.toml',
     '.codex\agents\frontend.toml',
     '.codex\agents\backend.toml',
     '.codex\agents\tester.toml',
     '.codex\agents\repoops.toml'
 )
+
+if ($IncludeConfig) {
+    $relativeFiles += '.codex\config.toml'
+}
 
 foreach ($relativeFile in $relativeFiles) {
     $source = Join-Path $projectRoot $relativeFile
@@ -20,4 +27,8 @@ foreach ($relativeFile in $relativeFiles) {
     Copy-Item -LiteralPath $source -Destination $target -Force
 }
 
-Write-Output 'Multi-agent template files synchronized.'
+if ($IncludeConfig) {
+    Write-Output 'Multi-agent template files and config synchronized.'
+} else {
+    Write-Output 'Multi-agent template files synchronized. Local config was not copied.'
+}

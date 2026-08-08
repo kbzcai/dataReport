@@ -1,27 +1,38 @@
-# Codex 多 Agent 项目模板
+# Codex multi-agent project template
 
-本目录保留了可复用的项目级 Codex 配置结构。使用时，将本目录中的 `AGENTS.md` 和 `.codex` 目录复制到目标项目根目录。
-
-目录结构：
+This directory is a reusable project-local Codex configuration for Java projects. Copy `AGENTS.md`, `.codex`, and the example `PROJECT_PROFILE.md` into a target project, then complete the profile using that project's actual layout and commands.
 
 ```text
-目标项目/
-├── AGENTS.md
-└── .codex/
-    ├── config.toml
-    └── agents/
-        ├── product.toml
-        ├── frontend.toml
-        ├── backend.toml
-        └── tester.toml
+target-project/
+|-- AGENTS.md
+|-- PROJECT_PROFILE.md
+`-- .codex/
+    |-- config.toml
+    `-- agents/
+        |-- product.toml
+        |-- frontend.toml
+        |-- backend.toml
+        |-- tester.toml
+        `-- repoops.toml
 ```
 
-后端角色面向 Java、Spring Boot 和 Spring Cloud 项目。复制后可按目标项目技术栈、路径和构建命令调整角色说明。
+`PROJECT_PROFILE.md` is project-specific. It declares the existing backend framework, build tool, module paths, optional frontend stack, database, and ordinary test command. It must never contain credentials or environment-specific endpoints. If it is absent or incomplete, roles detect the stack from the repository instead of treating the template defaults as facts.
 
-当源项目的 `AGENTS.md`、`.codex/config.toml` 或 `.codex/agents/*.toml` 更新后，在本目录执行：
+The routing levels keep normal requests efficient:
+
+- `L0`: general questions that do not read project files, handled directly.
+- `L1`: documentation, Agent configuration, and non-runtime project work; Product performs a compact scope check, while Tester is added only for security or rule-risk work.
+- `L2`: a single affected application side; Product, the affected implementation role, then Tester.
+- `L3`: cross-side, API-contract, database-schema, permission, or shared-runtime changes; Product, actual parallel implementation where independent, then Tester.
+
+Synchronize reusable rules from this project with:
 
 ```powershell
 .\sync-from-project.ps1
 ```
 
-脚本只同步多 Agent 配置，不同步测试账号、本地密码或环境变量文件。
+The default command copies `AGENTS.md` and role files only. It deliberately does not copy `PROJECT_PROFILE.md` or `.codex/config.toml`, which are normally project- or machine-specific. Copy the configuration only after manually confirming that it has no local network, model, proxy, or credential settings:
+
+```powershell
+.\sync-from-project.ps1 -IncludeConfig
+```
