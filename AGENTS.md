@@ -10,6 +10,26 @@
 - Tester：`.codex/agents/tester.toml`，负责契约审查、风险分析和验证结果。
 - RepoOps：`.codex/agents/repoops.toml`，仅负责 Git/GitHub/SVN 的仓库状态、拉取、提交、推送、分支和标签操作。
 
+## 强制调度协议
+
+本节约束协调 Agent 的实际派发行为；角色 TOML 只定义职责，不能替代运行时的子 Agent 调度。
+
+1. Product Agent 必须先输出固定影响矩阵，并为每项给出一句理由：
+
+   ```text
+   frontend=true|false
+   backend=true|false
+   database=true|false
+   contract_changed=true|false
+   ```
+
+   随后明确列出必须派发的角色、可并行组和前置依赖。`database=true` 归 Backend Agent 负责；没有实现变更时，矩阵四项均为 `false`，仍须派发 Product 和 Tester。
+2. 协调 Agent 必须依据已完成的影响矩阵实际启动实施角色：`frontend=true` 时启动 Frontend；`backend=true` 或 `database=true` 时启动 Backend。`contract_changed=true` 时必须至少派发一个相关实现角色并说明契约消费者；若确认只是文档示例变化，必须显式标注为 docs-only 并将 `contract_changed` 设为 `false`。不得在 Product 输出前启动实施角色。
+3. 当前端与后端均受影响时，协调 Agent 必须在同一阶段实际并行启动 Frontend 和 Backend，并向两者提供同一份 Product 契约；不得以“可并行”代替实际并行派发。实施任务存在真实依赖时，必须记录依赖原因和串行顺序。
+4. 所有实施角色完成后，才可启动 Tester 进行最终审查；Tester 不得与仍会产生待审查改动的实施角色并行执行最终审查。
+5. 协调 Agent 的过程更新和最终交付必须保留调度证据：Product 完成情况、已启动的实施角色、并行组、Tester 启动时机及不可用角色的原因。角色未启动、并行槽不足或工具不可用时，必须如实说明降级和风险，不得表述为已完成并行协作。
+6. 本协议只约束协调 Agent 的决策和审计，不能单独保证 Codex 运行时具有可用的多 Agent 工具或并发额度；运行时限制不得被配置掩盖。
+
 ## 版本控制快速通道
 
 仅当用户当前请求同时满足以下条件时，协调 Agent 才能只调度 RepoOps，不进入固定四角色流程：
