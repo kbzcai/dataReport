@@ -16,7 +16,7 @@ async function submit() {
   error.value = ''
   try {
     await auth.signIn(username.value, password.value)
-    const destination = auth.role === 'LEADER' ? '/reports' : '/reports/import'
+    const destination = auth.role === 'MAINTAINER' ? '/templates' : auth.role === 'REPORTER' ? '/reports/import' : '/reports'
     await router.replace(destination)
     if (router.currentRoute.value.path !== destination) window.location.replace(destination)
   } catch (e) {

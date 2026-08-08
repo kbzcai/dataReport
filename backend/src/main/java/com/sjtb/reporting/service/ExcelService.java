@@ -185,8 +185,8 @@ public class ExcelService {
     public ExcelDtos.ImportResult confirmImport(MultipartFile file, String mappingJson) {
         validateImportFile(file);
         Long batchId = batches.start(file.getOriginalFilename());
-        ImportMapping mapping = parseImportMapping(mappingJson);
         try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
+            ImportMapping mapping = parseImportMapping(mappingJson);
             List<TemplateDtos.Response> available = templates.list().stream().filter(TemplateDtos.Response::enabled).toList();
             List<ConfirmedSheet> confirmed = new ArrayList<>();
             int order = 0;

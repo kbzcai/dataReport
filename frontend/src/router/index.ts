@@ -34,13 +34,19 @@ const router = createRouter({
   ],
 })
 
+function defaultPath(role: string) {
+  if (role === 'MAINTAINER') return '/templates'
+  if (role === 'REPORTER') return '/reports/import'
+  return '/reports'
+}
+
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (!auth.initialized) await auth.loadUser()
-  if (to.meta.public) return auth.loggedIn ? '/' : true
+  if (to.meta.public) return auth.loggedIn ? defaultPath(auth.role) : true
   if (!auth.loggedIn) return '/login'
   const roles = to.meta.roles as string[] | undefined
-  if (roles?.length && !roles.includes(auth.role)) return auth.role === 'LEADER' ? '/reports' : '/reports/import'
+  if (roles?.length && !roles.includes(auth.role)) return defaultPath(auth.role)
   return true
 })
 
