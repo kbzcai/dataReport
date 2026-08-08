@@ -5,7 +5,8 @@ $relativeFiles = @(
     '.codex\agents\product.toml',
     '.codex\agents\frontend.toml',
     '.codex\agents\backend.toml',
-    '.codex\agents\tester.toml'
+    '.codex\agents\tester.toml',
+    '.codex\agents\repoops.toml'
 )
 
 foreach ($relativeFile in $relativeFiles) {

@@ -1,6 +1,6 @@
 # 多 Agent 协同规则
 
-本项目的每个用户需求都必须由协调 Agent 按以下流程进行子 Agent 协同。不得跳过角色分析后直接交付。
+除“版本控制快速通道”外，本项目的每个用户需求都必须由协调 Agent 按以下流程进行子 Agent 协同。不得跳过角色分析后直接交付。
 
 ## 角色配置
 
@@ -8,10 +8,29 @@
 - Frontend：`.codex/agents/frontend.toml`，负责 Vue 前端页面、交互、类型、路由和接口对接。
 - Backend：`.codex/agents/backend.toml`，负责 Java Spring Boot/Spring Cloud 接口、权限、事务、数据访问和测试。
 - Tester：`.codex/agents/tester.toml`，负责契约审查、风险分析和验证结果。
+- RepoOps：`.codex/agents/repoops.toml`，仅负责 Git/GitHub/SVN 的仓库状态、拉取、提交、推送、分支和标签操作。
+
+## 版本控制快速通道
+
+仅当用户当前请求同时满足以下条件时，协调 Agent 才能只调度 RepoOps，不进入固定四角色流程：
+
+1. 请求明确包含独立的版本控制关键词 `git`、`github`、`svn` 或 `subversion`（大小写不敏感）。
+2. 用户意图确为版本控制操作，例如状态查看、拉取、比较、分支、标签、提交或推送。
+3. 请求不包含业务代码、接口、数据库、配置或测试的修改要求。
+
+仅出现关键词不足以触发快速通道。例如“用 Git 分析代码 Bug”仍按正常流程处理；“git status”“github push”“svn update”可触发 RepoOps。
+
+- 纯版本控制请求：只调度 RepoOps。它仍须核对仓库根目录、远端 URL、分支、工作区和待提交差异。
+- 代码修改后附带版本控制请求：先完成 Product、相关实现角色和 Tester 的一次完整流程，再由 RepoOps 执行提交或推送；不得为同一批已审查改动重复调度四角色。
+- 存在未审查的业务代码改动时，RepoOps 不得直接提交，应交回正常流程。
+- 代码、配置、数据库或文档修改完成后，默认只保留工作区改动；任何角色均不得自动执行 `git add`、`git commit`、`git push`、`svn commit` 或其他提交动作。
+- RepoOps 只有在用户后续命令同时包含版本控制关键词和明确动作时才执行对应写操作。例如“git 提交”“github 推送”“svn update”；不得因“代码改好了”“查看 Git 状态”或单独出现“GitHub”等请求自动提交、推送或拉取。
+- `git push --force`、`git reset --hard`、`git clean`、变基、删除分支或标签、覆盖远端历史、SVN 回滚/删除等高风险操作，必须在展示目标和影响后取得用户二次明确确认。
+- 认证只能使用 Git Credential Manager、SSH 或安全存储的个人访问令牌；不得将账号密码、Token 或密钥写入项目文件、Git 配置、远端 URL 或提交历史。
 
 ## 强制流程
 
-1. 接收任何需求后，协调 Agent 先由 Product Agent 进行范围和影响分析。
+1. 接收任何不符合“版本控制快速通道”的需求后，协调 Agent 先由 Product Agent 进行范围和影响分析。
 2. 涉及前端、后端、数据库、接口或配置的变更，必须分别调度相关实现 Agent；前后端可并行，但必须共享 Product Agent 输出的契约。
 3. 所有变更完成后，必须由 Tester Agent 审查权限、兼容性、异常场景和验证结果。
 4. 对只读咨询、排障和小型修改，仍须至少由 Product Agent 判断影响范围，并由 Tester Agent 复核结论或验证命令。
@@ -23,6 +42,7 @@
 - Product 和 Tester 默认只读，不直接修改业务代码。
 - Frontend 仅修改前端目录及必要的前端配置。
 - Backend 仅修改后端、数据库迁移脚本及必要的后端配置。
+- RepoOps 仅操作版本控制元数据和用户明确指定的暂存、提交、拉取、推送、分支或标签；不得修改业务代码、数据库、应用配置或凭据。
 - 不允许任一角色越过权限边界修改无关模块、凭据或生产数据。
 
 ## 后端变更运行约束
