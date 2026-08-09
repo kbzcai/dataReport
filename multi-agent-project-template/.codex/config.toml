@@ -3,6 +3,3 @@ approval_policy = "on-request"
 
 # 2. 沙箱模式：限制 Codex 只能在当前工作区（项目目录）内读写文件
 sandbox_mode = "workspace-write"
-
-# 3. 推理强度：与用户当前选择保持一致
-reasoning_effort = "high"
