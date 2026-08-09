@@ -1,10 +1,15 @@
 export type Role = 'ADMIN' | 'MAINTAINER' | 'LEADER' | 'REPORTER'
+export type Permission = 'REPORT_VIEW' | 'REPORT_EDIT'
 
 export interface User {
   id: number | string
   username: string
   realName?: string
   role: Role | string
+  roles?: Array<Role | string>
+  permissions?: Array<Permission | string>
+  departmentId?: number | string | null
+  departmentName?: string
 }
 
 export interface TemplateColumn {
@@ -81,6 +86,7 @@ export interface ReportTask {
   status: string
   description?: string
   assigneeIds?: Array<number | string>
+  departmentIds?: Array<number | string>
   assignees?: Array<{ id: number | string; username: string; roles: string[] }>
   progress?: { assigneeCount: number; submittedAssigneeCount: number; pendingAssigneeCount: number }
 }

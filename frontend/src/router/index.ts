@@ -26,7 +26,8 @@ const router = createRouter({
         { path: 'reminders', component: ReminderView, meta: { roles: ['REPORTER'] } },
         { path: 'approvals', component: ApprovalView, meta: { roles: ['LEADER', 'ADMIN'] } },
         { path: 'analytics', component: AnalyticsView, meta: { roles: ['LEADER', 'ADMIN'] } },
-        { path: 'reports/import', component: ReportImportView, meta: { roles: ['REPORTER', 'LEADER', 'ADMIN'] } },
+        { path: 'departments', component: () => import('../views/DepartmentManageView.vue'), meta: { roles: ['ADMIN'] } },
+        { path: 'reports/import', component: ReportImportView, meta: { roles: ['REPORTER', 'LEADER', 'ADMIN'], permissions: ['REPORT_EDIT'] } },
         { path: 'reports', component: ReportManageView, meta: { roles: ['LEADER', 'ADMIN'] } },
       ],
     },
@@ -34,19 +35,23 @@ const router = createRouter({
   ],
 })
 
-function defaultPath(role: string) {
-  if (role === 'MAINTAINER') return '/templates'
-  if (role === 'REPORTER') return '/reports/import'
-  return '/reports'
+function defaultPath(roles: string[], permissions: string[]) {
+  if (roles.includes('ADMIN') || roles.includes('LEADER')) return '/reports'
+  if (roles.includes('MAINTAINER')) return '/templates'
+  if (roles.includes('REPORTER') && permissions.includes('REPORT_EDIT')) return '/reports/import'
+  if (roles.includes('REPORTER')) return '/my-reports'
+  return '/login'
 }
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (!auth.initialized) await auth.loadUser()
-  if (to.meta.public) return auth.loggedIn ? defaultPath(auth.role) : true
+  if (to.meta.public) return auth.loggedIn ? defaultPath(auth.roles, auth.permissions) : true
   if (!auth.loggedIn) return '/login'
   const roles = to.meta.roles as string[] | undefined
-  if (roles?.length && !roles.includes(auth.role)) return defaultPath(auth.role)
+  if (roles?.length && !roles.some(role => auth.roles.includes(role))) return defaultPath(auth.roles, auth.permissions)
+  const permissions = to.meta.permissions as string[] | undefined
+  if (permissions?.length && !permissions.some(permission => auth.permissions.includes(permission))) return defaultPath(auth.roles, auth.permissions)
   return true
 })
 

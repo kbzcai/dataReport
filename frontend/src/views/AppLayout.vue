@@ -5,18 +5,17 @@ import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
+const hasAnyRole = (...roles: string[]) => roles.some((role) => auth.roles.includes(role))
 const menus = computed(() => [
-  ...(auth.role === 'ADMIN' ? [{ to: '/users', label: '权限管理', icon: 'U' }] : []),
-  ...(['ADMIN', 'LEADER'].includes(auth.role) ? [{ to: '/tasks', label: '填报任务', icon: 'K' }] : []),
-  ...(['MAINTAINER', 'ADMIN'].includes(auth.role) ? [{ to: '/templates', label: '模板维护', icon: 'T' }] : []),
-  ...(['REPORTER', 'ADMIN', 'LEADER'].includes(auth.role) ? [{ to: '/reports/import', label: '数据填报', icon: 'F' }] : []),
-  ...(auth.role === 'REPORTER' ? [{ to: '/my-reports', label: '我的填报', icon: 'M' }] : []),
-  ...(auth.role === 'REPORTER' ? [{ to: '/reminders', label: '填报提醒', icon: 'R' }] : []),
-  ...(['LEADER', 'ADMIN'].includes(auth.role) ? [{ to: '/reports', label: '填报数据', icon: 'D' }] : []),
-  ...(['LEADER', 'ADMIN'].includes(auth.role) ? [{ to: '/approvals', label: '修改审批', icon: 'A' }] : []),
-  ...(['LEADER', 'ADMIN'].includes(auth.role) ? [{ to: '/analytics', label: '数据看板', icon: 'C' }] : []),
+  ...(hasAnyRole('ADMIN') ? [{ to: '/users', label: '权限管理', icon: 'U' }, { to: '/departments', label: '部门管理', icon: 'O' }] : []),
+  ...(hasAnyRole('ADMIN', 'LEADER') ? [{ to: '/tasks', label: '填报任务', icon: 'K' }] : []),
+  ...(hasAnyRole('MAINTAINER', 'ADMIN') ? [{ to: '/templates', label: '模板维护', icon: 'T' }] : []),
+  ...(hasAnyRole('REPORTER', 'ADMIN', 'LEADER') && auth.hasPermission('REPORT_EDIT') ? [{ to: '/reports/import', label: '数据填报', icon: 'F' }] : []),
+  ...(hasAnyRole('REPORTER') ? [{ to: '/my-reports', label: '我的填报', icon: 'M' }, { to: '/reminders', label: '填报提醒', icon: 'R' }] : []),
+  ...(hasAnyRole('LEADER', 'ADMIN') ? [{ to: '/reports', label: '填报数据', icon: 'D' }, { to: '/approvals', label: '修改审批', icon: 'A' }, { to: '/analytics', label: '数据看板', icon: 'C' }] : []),
 ])
-const roleName = computed(() => ({ ADMIN: '系统管理员', MAINTAINER: '模板管理员', LEADER: '数据领导', REPORTER: '填报人员' }[auth.role] || auth.role))
+const roleName = computed(() => auth.roles.map((role) => ({ ADMIN: '系统管理员', MAINTAINER: '模板管理员', LEADER: '数据领导', REPORTER: '填报人员' }[role] || role)).join('、'))
+
 async function logout() {
   auth.signOut()
   await router.replace('/login')

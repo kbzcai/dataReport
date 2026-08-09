@@ -25,6 +25,8 @@ The routing levels keep normal requests efficient:
 - `L2`: a single affected application side; Product, the affected implementation role, then Tester.
 - `L3`: cross-side, API-contract, database-schema, permission, or shared-runtime changes; Product, actual parallel implementation where independent, then Tester.
 
+For an independent L3 change, the coordinator creates `Frontend` and `Backend` in the same dispatch stage after Product finishes. A returned Agent ID proves dispatch; a naturally visible “started working”, `running`, progress update, file change, or “completed” result proves that the Agent worked. Same-stage dispatch without waiting for either result is “parallel dispatch”. Only naturally overlapping visible working states may be labelled “running in parallel”. Do not create probes or poll repeatedly just to capture an overlapping `running` state. The final delivery records each Agent ID, visible state, owned directories, shared Product contract, and the later Tester review.
+
 Synchronize reusable rules from this project with:
 
 ```powershell

@@ -2,7 +2,8 @@ import http from './http'
 import type { ReportTask } from '../types'
 
 export const listTasks = () => http.get<unknown, ReportTask[]>('/tasks')
-export const listAssignableUsers = () => http.get<unknown, Array<{ id: number | string; username: string; roles: string[] }>>('/tasks/assignable-users')
+export interface AssignableTarget { id: number | string; name: string; parentId?: number | string | null; users: Array<{ id: number | string; username: string; roles: string[] }> }
+export const listAssignableTargets = () => http.get<unknown, AssignableTarget[]>('/tasks/assignable-targets')
 export interface TaskReminder { taskId: number | string; taskName: string; templateName: string; periodLabel?: string; deadline?: string; level: 'PENDING' | 'DUE_SOON' | 'OVERDUE' }
 export interface TaskOverview { total: number; published: number; dueSoon: number; overdue: number; completed: number; pendingAssignees: number }
 export const listTaskReminders = () => http.get<unknown, TaskReminder[]>('/tasks/reminders')

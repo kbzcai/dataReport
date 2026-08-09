@@ -20,6 +20,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -28,37 +29,39 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 @Service @Transactional
 public class ReportService {
-    private final ReportRecordRepository records; private final ReportRecordValueRepository values; private final ReportChangeRequestRepository changeRequests; private final TemplateService templates; private final TaskService tasks; private final ReportAuditService audit; private final CurrentUserService currentUsers; private final ObjectMapper mapper;
-    public ReportService(ReportRecordRepository records, ReportRecordValueRepository values, ReportChangeRequestRepository changeRequests, TemplateService templates, TaskService tasks, ReportAuditService audit, CurrentUserService currentUsers, ObjectMapper mapper) { this.records = records; this.values = values; this.changeRequests = changeRequests; this.templates = templates; this.tasks = tasks; this.audit = audit; this.currentUsers = currentUsers; this.mapper = mapper; }
+    private final ReportRecordRepository records; private final ReportRecordValueRepository values; private final ReportChangeRequestRepository changeRequests; private final TemplateService templates; private final TaskService tasks; private final ReportAuditService audit; private final CurrentUserService currentUsers; private final ObjectMapper mapper; private final AccessControlService access;
+    public ReportService(ReportRecordRepository records, ReportRecordValueRepository values, ReportChangeRequestRepository changeRequests, TemplateService templates, TaskService tasks, ReportAuditService audit, CurrentUserService currentUsers, ObjectMapper mapper, AccessControlService access) { this.records = records; this.values = values; this.changeRequests = changeRequests; this.templates = templates; this.tasks = tasks; this.audit = audit; this.currentUsers = currentUsers; this.mapper = mapper; this.access = access; }
     @Transactional(readOnly = true) public List<ReportDtos.Response> list(Long templateId) {
-        User user = currentUsers.current(); boolean leadership = user.getRoles().contains(Role.ADMIN) || user.getRoles().contains(Role.LEADER);
-        List<ReportRecord> source = leadership ? (templateId == null ? records.findAll() : records.findByTemplateIdOrderByUpdatedAtDesc(templateId)) : records.findByReporterIdOrderByUpdatedAtDesc(user.getId());
+        User user = currentUsers.current(); access.requireView(user); java.util.Set<Long> scope = access.scopeDepartmentIds(user);
+        List<ReportRecord> source = templateId == null ? records.findAll() : records.findByTemplateIdOrderByUpdatedAtDesc(templateId);
+        source = source.stream().filter(record -> access.canReadRecord(user, record, scope)).toList();
         return source.stream().map(this::toResponse).toList();
     }
     @Transactional(readOnly = true) public List<ReportDtos.Summary> summaries() {
-        User user = currentUsers.current(); boolean leadership = user.getRoles().contains(Role.ADMIN) || user.getRoles().contains(Role.LEADER);
-        return leadership ? records.findSummaries() : records.findSummariesByReporterId(user.getId());
+        User user = currentUsers.current(); access.requireView(user); java.util.Set<Long> scope = access.scopeDepartmentIds(user);
+        return records.findAll().stream().filter(record -> access.canReadRecord(user, record, scope))
+                .collect(java.util.stream.Collectors.groupingBy(record -> record.getTemplate().getId() + ":" + record.getReporter().getId(), java.util.LinkedHashMap::new, java.util.stream.Collectors.toList()))
+                .values().stream().map(group -> { ReportRecord first = group.get(0); return new ReportDtos.Summary(first.getTemplate().getId(), first.getTemplate().getName(), first.getReporter().getId(), first.getReporter().getUsername(), (long) group.size()); }).toList();
     }
     @Transactional(readOnly = true) public ReportDtos.PageResponse page(Long templateId, Long reporterId, int page, int size) {
         if (page < 0 || size < 1 || size > 50) throw new ApiException(HttpStatus.BAD_REQUEST, "Page must be non-negative and size must be between 1 and 50");
-        User user = currentUsers.current(); boolean leadership = user.getRoles().contains(Role.ADMIN) || user.getRoles().contains(Role.LEADER);
+        User user = currentUsers.current(); access.requireView(user); java.util.Set<Long> scope = access.scopeDepartmentIds(user);
         PageRequest pageable = PageRequest.of(page, size, org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "updatedAt"));
-        Page<ReportRecord> source;
-        if (leadership) {
-            if (templateId != null && reporterId != null) source = records.findByTemplateIdAndReporterId(templateId, reporterId, pageable);
-            else source = templateId == null ? records.findAll(pageable) : records.findByTemplateId(templateId, pageable);
-        }
-        else source = templateId == null ? records.findByReporterId(user.getId(), pageable) : records.findByReporterIdAndTemplateId(user.getId(), templateId, pageable);
+        List<ReportRecord> candidates = templateId == null ? records.findAll() : records.findByTemplateId(templateId);
+        List<ReportRecord> visible = candidates.stream().filter(record -> reporterId == null || reporterId.equals(record.getReporter().getId())).filter(record -> access.canReadRecord(user, record, scope)).sorted(java.util.Comparator.comparing(ReportRecord::getUpdatedAt).reversed()).toList();
+        int start = Math.min(page * size, visible.size());
+        int end = Math.min(start + size, visible.size());
+        Page<ReportRecord> source = new PageImpl<>(visible.subList(start, end), pageable, visible.size());
         return new ReportDtos.PageResponse(source.getContent().stream().map(this::toResponse).toList(), source.getTotalElements(), source.getNumber(), source.getSize(), source.getTotalPages());
     }
     @Transactional(readOnly = true) public ReportDtos.Response get(Long id) { ReportRecord entity = find(id); assertCanRead(entity); return toResponse(entity); }
     public ReportRecord findForAudit(Long id) { ReportRecord entity = find(id); assertCanRead(entity); return entity; }
     @Transactional(readOnly = true) public List<ReportDtos.Response> query(Long templateId, String fieldKey, String value) {
         if (fieldKey == null || fieldKey.isBlank()) throw new ApiException(HttpStatus.BAD_REQUEST, "fieldKey is required");
-        User user = currentUsers.current(); boolean leadership = user.getRoles().contains(Role.ADMIN) || user.getRoles().contains(Role.LEADER);
+        User user = currentUsers.current(); access.requireView(user); java.util.Set<Long> scope = access.scopeDepartmentIds(user);
         return values.findByFieldKeyAndValueText(fieldKey, value == null ? "" : value.trim()).stream().map(com.sjtb.reporting.domain.ReportRecordValue::getRecord)
                 .filter(record -> templateId == null || record.getTemplate().getId().equals(templateId))
-                .filter(record -> leadership || record.getReporter().getId().equals(user.getId()))
+                .filter(record -> access.canReadRecord(user, record, scope))
                 .map(this::toResponse).toList();
     }
     public ReportDtos.Response create(ReportDtos.Request request) {
@@ -79,29 +82,31 @@ public class ReportService {
         return requests.stream().map(this::create).toList();
     }
     public ReportDtos.Response update(Long id, ReportDtos.Request request) {
-        ReportRecord entity = find(id); User user = currentUsers.current(); boolean leader = user.getRoles().contains(Role.ADMIN) || user.getRoles().contains(Role.LEADER);
-        if (!leader && !entity.getReporter().getId().equals(user.getId())) throw new ApiException(HttpStatus.FORBIDDEN, "Only the reporter or leader may modify this record");
-        if (!leader && entity.getStatus() != ReportStatus.DRAFT) throw new ApiException(HttpStatus.BAD_REQUEST, "Submitted reports must be changed through a change request");
-        String before = entity.getDataJson(); ReportTemplate template = templates.find(request.templateId()); if (!template.isEnabled() && !leader) throw new ApiException(HttpStatus.BAD_REQUEST, "Template is disabled"); ReportTask task = request.taskId() == null ? entity.getTask() : tasks.find(request.taskId()); validateTask(task, template, user); ReportTemplateVersion version = resolveVersion(template, task, request.templateVersionId() == null && entity.getTemplateVersion() != null ? entity.getTemplateVersion().getId() : request.templateVersionId()); Map<String, Object> data = applyDefaults(version, request.data()); validateData(version, data); validateUniqueValues(template, version, data, entity.getId()); if (request.status() != null) validateReporterStatus(user, request.status()); entity.setTemplate(template); entity.setTemplateVersion(version); entity.setTask(task); entity.setDataJson(writeData(data)); if (request.status() != null) entity.setStatus(request.status()); ReportRecord saved = records.save(entity); syncValues(saved, version, data); audit.record(saved, "UPDATE", before, saved.getDataJson(), null); return toResponse(saved);
+        ReportRecord entity = find(id); User user = currentUsers.current(); boolean manager = access.isAdmin(user) || (access.isLeader(user) && access.canManageDepartment(user, entity.getReporter().getDepartment()));
+        if (!access.canEditRecord(user, entity)) throw new ApiException(HttpStatus.FORBIDDEN, "You cannot modify this record");
+        if (!manager && entity.getStatus() != ReportStatus.DRAFT) throw new ApiException(HttpStatus.BAD_REQUEST, "Submitted reports must be changed through a change request");
+        String before = entity.getDataJson(); ReportTemplate template = templates.find(request.templateId()); if (!template.isEnabled() && !manager) throw new ApiException(HttpStatus.BAD_REQUEST, "Template is disabled"); ReportTask task = request.taskId() == null ? entity.getTask() : tasks.find(request.taskId()); validateTask(task, template, user); ReportTemplateVersion version = resolveVersion(template, task, request.templateVersionId() == null && entity.getTemplateVersion() != null ? entity.getTemplateVersion().getId() : request.templateVersionId()); Map<String, Object> data = applyDefaults(version, request.data()); validateData(version, data); validateUniqueValues(template, version, data, entity.getId()); if (request.status() != null) validateReporterStatus(user, request.status()); entity.setTemplate(template); entity.setTemplateVersion(version); entity.setTask(task); entity.setDataJson(writeData(data)); if (request.status() != null) entity.setStatus(request.status()); ReportRecord saved = records.save(entity); syncValues(saved, version, data); audit.record(saved, "UPDATE", before, saved.getDataJson(), null); return toResponse(saved);
     }
     public ReportDtos.Response review(Long id, ReportDtos.ReviewRequest request) {
-        ReportRecord entity = find(id); entity.setStatus(request.status()); entity.setReviewComment(request.reviewComment()); audit.record(entity, "REVIEW", entity.getDataJson(), entity.getDataJson(), request.reviewComment()); return toResponse(entity);
+        ReportRecord entity = find(id); User user = currentUsers.current();
+        if (!(access.isAdmin(user) || (access.isLeader(user) && access.canManageDepartment(user, entity.getReporter().getDepartment()))) || !access.hasEdit(user)) throw new ApiException(HttpStatus.FORBIDDEN, "Only a scoped leader with REPORT_EDIT may review this record");
+        entity.setStatus(request.status()); entity.setReviewComment(request.reviewComment()); audit.record(entity, "REVIEW", entity.getDataJson(), entity.getDataJson(), request.reviewComment()); return toResponse(entity);
     }
-    public void delete(Long id) { ReportRecord entity = find(id); User user = currentUsers.current(); boolean leader = user.getRoles().contains(Role.ADMIN) || user.getRoles().contains(Role.LEADER); if (!leader && !entity.getReporter().getId().equals(user.getId())) throw new ApiException(HttpStatus.FORBIDDEN, "Only the reporter or leader may delete this record"); if (!leader && entity.getStatus() != ReportStatus.DRAFT) throw new ApiException(HttpStatus.BAD_REQUEST, "Submitted reports must be changed through a change request"); audit.record(entity, "DELETE", entity.getDataJson(), null, null); if (changeRequests.existsByReportId(id)) changeRequests.deleteByReportId(id); records.delete(entity); }
+    public void delete(Long id) { ReportRecord entity = find(id); User user = currentUsers.current(); boolean manager = access.isAdmin(user) || (access.isLeader(user) && access.canManageDepartment(user, entity.getReporter().getDepartment())); if (!access.canEditRecord(user, entity)) throw new ApiException(HttpStatus.FORBIDDEN, "You cannot delete this record"); if (!manager && entity.getStatus() != ReportStatus.DRAFT) throw new ApiException(HttpStatus.BAD_REQUEST, "Submitted reports must be changed through a change request"); audit.record(entity, "DELETE", entity.getDataJson(), null, null); if (changeRequests.existsByReportId(id)) changeRequests.deleteByReportId(id); records.delete(entity); }
     private ReportRecord find(Long id) { return records.findById(id).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Report record not found")); }
-    private void assertCanRead(ReportRecord entity) { User user = currentUsers.current(); if (!user.getRoles().contains(Role.ADMIN) && !user.getRoles().contains(Role.LEADER) && !entity.getReporter().getId().equals(user.getId())) throw new ApiException(HttpStatus.FORBIDDEN, "You cannot view this record"); }
-    private void assertCanFill(User user) { if (!user.getRoles().contains(Role.ADMIN) && !user.getRoles().contains(Role.LEADER) && !user.getRoles().contains(Role.REPORTER) && !user.getRoles().contains(Role.EDITOR)) throw new ApiException(HttpStatus.FORBIDDEN, "Your role cannot submit report data"); }
+    private void assertCanRead(ReportRecord entity) { User user = currentUsers.current(); if (!access.canReadRecord(user, entity)) throw new ApiException(HttpStatus.FORBIDDEN, "You cannot view this record"); }
+    private void assertCanFill(User user) { access.requireEdit(user); if (!access.isAdmin(user) && !access.isLeader(user) && !user.getRoles().contains(Role.REPORTER)) throw new ApiException(HttpStatus.FORBIDDEN, "Your role cannot submit report data"); }
     private void validateReporterStatus(User user, ReportStatus status) { if (!user.getRoles().contains(Role.ADMIN) && !user.getRoles().contains(Role.LEADER) && status != ReportStatus.DRAFT && status != ReportStatus.SUBMITTED) throw new ApiException(HttpStatus.FORBIDDEN, "Only a leader or administrator may set this report status"); }
-    private void validateTask(ReportTask task, ReportTemplate template, User user) {
+    void validateTask(ReportTask task, ReportTemplate template, User user) {
         if (task == null) return;
         if (!task.getTemplate().getId().equals(template.getId())) throw new ApiException(HttpStatus.BAD_REQUEST, "Task and template do not match");
-        boolean manager = user.getRoles().contains(Role.ADMIN) || user.getRoles().contains(Role.LEADER);
-        if (manager) return;
+        if (access.isAdmin(user)) return;
         if (!"PUBLISHED".equals(task.getStatus())) throw new ApiException(HttpStatus.BAD_REQUEST, "This task is not published");
         LocalDateTime now = LocalDateTime.now();
         if (task.getStartAt() != null && now.isBefore(task.getStartAt())) throw new ApiException(HttpStatus.BAD_REQUEST, "This task has not started");
         if (task.getDeadline() != null && now.isAfter(task.getDeadline()) && !task.isAllowLate()) throw new ApiException(HttpStatus.BAD_REQUEST, "This task is past its deadline");
-        if (!task.getAssignees().isEmpty() && task.getAssignees().stream().noneMatch(item -> item.getId().equals(user.getId()))) throw new ApiException(HttpStatus.FORBIDDEN, "You are not assigned to this task");
+        if (task.getAssignees() == null || task.getAssignees().isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "Published tasks must have at least one assignee");
+        if (task.getAssignees().stream().noneMatch(item -> item.getId().equals(user.getId()))) throw new ApiException(HttpStatus.FORBIDDEN, "You are not assigned to this task");
     }
     void validateData(ReportTemplateVersion version, Map<String, Object> data) {
         List<TemplateDtos.Column> columns = templates.columns(version); for (TemplateDtos.Column column : columns) {

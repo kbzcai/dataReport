@@ -14,6 +14,7 @@ public class AuthService {
     public AuthDtos.LoginResponse login(AuthDtos.LoginRequest request) {
         var authentication = authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(request.username(), request.password()));
         UserDetails user = (UserDetails) authentication.getPrincipal();
-        return new AuthDtos.LoginResponse(jwtService.createToken(user), user.getUsername(), user.getAuthorities().stream().map(a -> a.getAuthority().replace("ROLE_", "")).collect(java.util.stream.Collectors.toSet()));
+        var authorities = user.getAuthorities().stream().map(org.springframework.security.core.GrantedAuthority::getAuthority).collect(java.util.stream.Collectors.toSet());
+        return new AuthDtos.LoginResponse(jwtService.createToken(user), user.getUsername(), authorities.stream().filter(value -> value.startsWith("ROLE_")).map(value -> value.substring(5)).collect(java.util.stream.Collectors.toSet()), authorities.stream().filter(value -> value.startsWith("PERM_")).map(value -> value.substring(5)).collect(java.util.stream.Collectors.toSet()));
     }
 }

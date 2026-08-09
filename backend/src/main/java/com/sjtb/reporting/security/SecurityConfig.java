@@ -25,7 +25,7 @@ public class SecurityConfig {
     @Bean UserDetailsService userDetailsService(UserRepository users) {
         return username -> users.findByUsername(username).map(user -> org.springframework.security.core.userdetails.User.builder()
                 .username(user.getUsername()).password(user.getPassword()).disabled(!user.isEnabled())
-                .authorities(user.getRoles().stream().map(role -> "ROLE_" + role.name()).toArray(String[]::new)).build())
+                .authorities(java.util.stream.Stream.concat(user.getRoles().stream().map(role -> "ROLE_" + role.name()), user.getPermissions().stream().map(permission -> "PERM_" + permission.name())).toArray(String[]::new)).build())
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
     }
     @Bean AuthenticationProvider authenticationProvider(UserDetailsService service, PasswordEncoder encoder) {

@@ -6,7 +6,11 @@ export const useAuthStore = defineStore('auth', {
   state: () => ({ user: null as User | null, initialized: false }),
   getters: {
     loggedIn: () => Boolean(localStorage.getItem('reporting_token')),
-    role: (state) => String(state.user?.role || '').toUpperCase(),
+    roles: (state) => (state.user?.roles?.length ? state.user.roles : [state.user?.role || '']).map(role => String(role).toUpperCase()).filter(Boolean),
+    permissions: (state) => (state.user?.permissions || []).map(permission => String(permission).toUpperCase()).filter(Boolean),
+    hasRole(): (role: string) => boolean { return (role) => this.roles.includes(role.toUpperCase()) },
+    hasPermission(): (permission: string) => boolean { return (permission) => this.permissions.includes(permission.toUpperCase()) },
+    role(): string { return this.roles[0] || '' },
   },
   actions: {
     async signIn(username: string, password: string) {

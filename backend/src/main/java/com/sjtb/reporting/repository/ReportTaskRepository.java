@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ReportTaskRepository extends JpaRepository<ReportTask, Long> {
     List<ReportTask> findByTemplateId(Long templateId);
+    boolean existsByTargetDepartmentsId(Long departmentId);
     @EntityGraph(attributePaths = {"template", "assignees"})
     List<ReportTask> findByAssigneesIdOrderByDeadlineAsc(Long userId);
     @EntityGraph(attributePaths = {"template", "assignees"})

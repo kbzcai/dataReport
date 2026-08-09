@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 public interface UserRepository extends JpaRepository<User, Long> {
     Optional<User> findByUsername(String username);
     boolean existsByUsername(String username);
+    boolean existsByDepartmentId(Long departmentId);
 
     @Query("select distinct user from User user join user.roles role where user.enabled = true and role in :roles order by user.username")
     List<User> findEnabledUsersWithAnyRole(@Param("roles") Collection<Role> roles);

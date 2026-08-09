@@ -25,8 +25,8 @@ public class TemplateController {
     @PostMapping("/import-preview") @PreAuthorize("hasAnyRole('ADMIN','MAINTAINER')") public com.sjtb.reporting.dto.TemplateImportDtos.PreviewResponse importPreview(@RequestParam("file") MultipartFile file) { return excel.previewTemplateImport(file); }
     @PostMapping("/import-confirm") @PreAuthorize("hasAnyRole('ADMIN','MAINTAINER')") public List<TemplateDtos.Response> importConfirm(@RequestParam String names, @RequestParam("file") MultipartFile file) { return excel.importTemplates(names, file); }
     @PostMapping("/{id}/file") @PreAuthorize("hasAnyRole('ADMIN','MAINTAINER')") public TemplateDtos.Response replaceTemplateFile(@PathVariable Long id, @RequestParam("file") MultipartFile file) { return excel.replaceTemplateColumns(id, file); }
-    @GetMapping("/{id}/download") @PreAuthorize("hasAnyRole('ADMIN','MAINTAINER','LEADER','REPORTER','EDITOR','VIEWER')") public ResponseEntity<byte[]> downloadAlias(@PathVariable Long id) { return download(id); }
-    @GetMapping("/{id}/excel-template") @PreAuthorize("hasAnyRole('ADMIN','MAINTAINER','LEADER','EDITOR','VIEWER')")
+    @GetMapping("/{id}/download") @PreAuthorize("hasAnyRole('ADMIN','MAINTAINER','LEADER','REPORTER')") public ResponseEntity<byte[]> downloadAlias(@PathVariable Long id) { return download(id); }
+    @GetMapping("/{id}/excel-template") @PreAuthorize("hasAnyRole('ADMIN','MAINTAINER','LEADER')")
     public ResponseEntity<byte[]> download(@PathVariable Long id) {
         TemplateDtos.Response template = templates.get(id);
         String filename = ContentDisposition.attachment().filename(template.name() + ".xlsx", StandardCharsets.UTF_8).build().toString();

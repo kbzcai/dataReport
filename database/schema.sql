@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS sys_user (
   username VARCHAR(64) NOT NULL,
   password VARCHAR(255) NOT NULL COMMENT 'BCrypt 密码摘要',
   enabled TINYINT(1) NOT NULL DEFAULT 1,
+  department_id BIGINT DEFAULT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id), UNIQUE KEY uk_sys_user_username (username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统用户';
@@ -16,6 +17,21 @@ CREATE TABLE IF NOT EXISTS sys_user_role (
   PRIMARY KEY (user_id, role),
   CONSTRAINT fk_user_role_user FOREIGN KEY (user_id) REFERENCES sys_user (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户角色关系';
+
+CREATE TABLE IF NOT EXISTS sys_department (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  name VARCHAR(128) NOT NULL,
+  parent_id BIGINT DEFAULT NULL,
+  PRIMARY KEY (id), KEY idx_department_parent (parent_id),
+  CONSTRAINT fk_department_parent FOREIGN KEY (parent_id) REFERENCES sys_department (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='部门层级';
+
+CREATE TABLE IF NOT EXISTS sys_user_permission (
+  user_id BIGINT NOT NULL,
+  permission VARCHAR(32) NOT NULL,
+  PRIMARY KEY (user_id, permission),
+  CONSTRAINT fk_user_permission_user FOREIGN KEY (user_id) REFERENCES sys_user (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户权限';
 
 CREATE TABLE IF NOT EXISTS report_template (
   id BIGINT NOT NULL AUTO_INCREMENT,
@@ -69,6 +85,14 @@ CREATE TABLE IF NOT EXISTS report_task_assignee (
   CONSTRAINT fk_task_assignee_task FOREIGN KEY (task_id) REFERENCES report_task (id) ON DELETE CASCADE,
   CONSTRAINT fk_task_assignee_user FOREIGN KEY (user_id) REFERENCES sys_user (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='任务填报人员';
+
+CREATE TABLE IF NOT EXISTS report_task_department (
+  task_id BIGINT NOT NULL,
+  department_id BIGINT NOT NULL,
+  PRIMARY KEY (task_id, department_id),
+  CONSTRAINT fk_task_department_task FOREIGN KEY (task_id) REFERENCES report_task (id) ON DELETE CASCADE,
+  CONSTRAINT fk_task_department_department FOREIGN KEY (department_id) REFERENCES sys_department (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='任务目标部门';
 
 CREATE TABLE IF NOT EXISTS report_task_detail (
   id BIGINT NOT NULL AUTO_INCREMENT,
@@ -239,3 +263,83 @@ WHERE t.code IN ('monthly_operation', 'annual_operation')
     SELECT 1 FROM report_template_version v
     WHERE v.template_id = t.id
   );
+
+-- V2: role/permission and department-reference migration for existing local databases.
+-- Kept idempotent so the bootstrap script can be run again without changing data semantics.
+CREATE TABLE IF NOT EXISTS schema_migration_history (
+  version VARCHAR(64) NOT NULL,
+  description VARCHAR(255) NOT NULL,
+  applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (version)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_user_role (user_id, role)
+SELECT user_id, 'REPORTER' FROM sys_user_role WHERE role IN ('EDITOR', 'VIEWER');
+INSERT IGNORE INTO sys_user_permission (user_id, permission)
+SELECT user_id, 'REPORT_VIEW' FROM sys_user_role WHERE role IN ('EDITOR', 'VIEWER');
+INSERT IGNORE INTO sys_user_permission (user_id, permission)
+SELECT user_id, 'REPORT_EDIT' FROM sys_user_role WHERE role = 'EDITOR';
+-- Preserve the capabilities of users created before permissions were stored
+-- separately. New users must be assigned permissions explicitly by the API.
+INSERT IGNORE INTO sys_user_permission (user_id, permission)
+SELECT user_id, 'REPORT_VIEW' FROM sys_user_role WHERE role IN ('LEADER', 'REPORTER');
+INSERT IGNORE INTO sys_user_permission (user_id, permission)
+SELECT user_id, 'REPORT_EDIT' FROM sys_user_role WHERE role IN ('LEADER', 'REPORTER');
+DELETE FROM sys_user_role WHERE role IN ('EDITOR', 'VIEWER');
+
+-- Hibernate may already have added department_id on a running legacy schema. Add the
+-- missing referential constraints explicitly, and replace the old CASCADE target FK.
+SET @user_department_column := (
+  SELECT COLUMN_NAME FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sys_user' AND COLUMN_NAME = 'department_id'
+  LIMIT 1
+);
+SET @sql := IF(@user_department_column IS NULL,
+  'ALTER TABLE sys_user ADD COLUMN department_id BIGINT DEFAULT NULL',
+  'SELECT 1');
+PREPARE migration_stmt FROM @sql;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+
+SET @user_department_fk := (
+  SELECT kcu.CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE kcu
+  WHERE kcu.CONSTRAINT_SCHEMA = DATABASE() AND kcu.TABLE_NAME = 'sys_user'
+    AND kcu.COLUMN_NAME = 'department_id' AND kcu.REFERENCED_TABLE_NAME = 'sys_department'
+  LIMIT 1
+);
+SET @sql := IF(@user_department_fk IS NULL,
+  'ALTER TABLE sys_user ADD CONSTRAINT fk_user_department FOREIGN KEY (department_id) REFERENCES sys_department (id)',
+  'SELECT 1');
+PREPARE migration_stmt FROM @sql;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+
+SET @task_department_fk := (
+  SELECT kcu.CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE kcu
+  JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
+    ON rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+  WHERE kcu.CONSTRAINT_SCHEMA = DATABASE() AND kcu.TABLE_NAME = 'report_task_department'
+    AND kcu.COLUMN_NAME = 'department_id' AND kcu.REFERENCED_TABLE_NAME = 'sys_department'
+    AND rc.DELETE_RULE = 'CASCADE'
+  LIMIT 1
+);
+SET @sql := IF(@task_department_fk IS NULL, 'SELECT 1',
+  CONCAT('ALTER TABLE report_task_department DROP FOREIGN KEY `', REPLACE(@task_department_fk, '`', '``'), '`'));
+PREPARE migration_stmt FROM @sql;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+SET @task_department_fk := (
+  SELECT kcu.CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE kcu
+  WHERE kcu.CONSTRAINT_SCHEMA = DATABASE() AND kcu.TABLE_NAME = 'report_task_department'
+    AND kcu.COLUMN_NAME = 'department_id' AND kcu.REFERENCED_TABLE_NAME = 'sys_department'
+  LIMIT 1
+);
+SET @sql := IF(@task_department_fk IS NULL,
+  'ALTER TABLE report_task_department ADD CONSTRAINT fk_task_department_department FOREIGN KEY (department_id) REFERENCES sys_department (id)',
+  'SELECT 1');
+PREPARE migration_stmt FROM @sql;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+
+INSERT IGNORE INTO schema_migration_history (version, description)
+VALUES ('V2_roles_permissions_department_fks', 'Migrated legacy roles and protected department references');

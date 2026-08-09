@@ -21,12 +21,13 @@ public class ImportBatchService {
     private static final Pattern ROW_ERROR = Pattern.compile("Sheet '([^']+)', row (\\d+): (.*)");
     private final ReportImportBatchRepository batches;
     private final ReportImportErrorRepository errors;
-    private final CurrentUserService current;
-    public ImportBatchService(ReportImportBatchRepository batches, ReportImportErrorRepository errors, CurrentUserService current) { this.batches = batches; this.errors = errors; this.current = current; }
+    private final CurrentUserService current; private final AccessControlService access;
+    public ImportBatchService(ReportImportBatchRepository batches, ReportImportErrorRepository errors, CurrentUserService current, AccessControlService access) { this.batches = batches; this.errors = errors; this.current = current; this.access = access; }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Long start(String fileName) {
-        ReportImportBatch batch = new ReportImportBatch(); batch.setOriginalFileName(fileName == null || fileName.isBlank() ? "import.xlsx" : fileName); batch.setCreator(current.current());
+        User creator = current.current(); access.requireEdit(creator);
+        ReportImportBatch batch = new ReportImportBatch(); batch.setOriginalFileName(fileName == null || fileName.isBlank() ? "import.xlsx" : fileName); batch.setCreator(creator);
         return batches.save(batch).getId();
     }
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -44,8 +45,9 @@ public class ImportBatchService {
     }
     @Transactional(readOnly = true)
     public List<ExcelDtos.BatchResponse> list() {
-        User user = current.current(); boolean manager = user.getRoles().contains(Role.ADMIN) || user.getRoles().contains(Role.LEADER);
-        List<ReportImportBatch> source = manager ? batches.findAllByOrderByCreatedAtDesc() : batches.findByCreatorIdOrderByCreatedAtDesc(user.getId());
+        User user = current.current(); access.requireView(user); java.util.Set<Long> scope = access.scopeDepartmentIds(user);
+        List<ReportImportBatch> source = batches.findAllByOrderByCreatedAtDesc().stream()
+                .filter(batch -> batch.getCreator().getId().equals(user.getId()) || access.canManageDepartment(user, batch.getCreator().getDepartment(), scope)).toList();
         return source.stream().map(this::response).toList();
     }
     @Transactional(readOnly = true)
@@ -56,7 +58,7 @@ public class ImportBatchService {
         ByteArrayOutputStream output = new ByteArrayOutputStream(); output.writeBytes(new byte[] {(byte) 0xEF, (byte) 0xBB, (byte) 0xBF}); output.writeBytes(text.toString().getBytes(StandardCharsets.UTF_8)); return output.toByteArray();
     }
     private ReportImportBatch find(Long id) { return batches.findById(id).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Import batch not found")); }
-    private void assertVisible(ReportImportBatch batch) { User user = current.current(); if (!user.getRoles().contains(Role.ADMIN) && !user.getRoles().contains(Role.LEADER) && !batch.getCreator().getId().equals(user.getId())) throw new ApiException(HttpStatus.FORBIDDEN, "You cannot access this import batch"); }
+    private void assertVisible(ReportImportBatch batch) { User user = current.current(); if (!access.hasView(user) || (!batch.getCreator().getId().equals(user.getId()) && !access.canManageDepartment(user, batch.getCreator().getDepartment()))) throw new ApiException(HttpStatus.FORBIDDEN, "You cannot access this import batch"); }
     private ExcelDtos.BatchResponse response(ReportImportBatch batch) { return new ExcelDtos.BatchResponse(batch.getId(), batch.getOriginalFileName(), batch.getCreator().getUsername(), batch.getStatus(), batch.getImportedRows(), batch.getFailedRows(), batch.getSummary(), batch.getCreatedAt(), batch.getCompletedAt()); }
     private static String trim(String value) { if (value == null || value.isBlank()) return "导入失败"; return value.length() > 1000 ? value.substring(0, 1000) : value; }
     private static String csv(String value) { return '"' + (value == null ? "" : value.replace("\"", "\"\"")) + '"'; }

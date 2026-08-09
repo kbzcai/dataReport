@@ -23,6 +23,9 @@ public class ReportTask {
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(name = "report_task_assignee", joinColumns = @JoinColumn(name = "task_id"), inverseJoinColumns = @JoinColumn(name = "user_id"))
     private Set<User> assignees = new HashSet<>();
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(name = "report_task_department", joinColumns = @JoinColumn(name = "task_id"), inverseJoinColumns = @JoinColumn(name = "department_id"))
+    private Set<Department> targetDepartments = new HashSet<>();
     @Column(nullable = false, updatable = false) private LocalDateTime createdAt = LocalDateTime.now();
     @Column(nullable = false) private LocalDateTime updatedAt = LocalDateTime.now();
     @PreUpdate void touch() { updatedAt = LocalDateTime.now(); }
@@ -37,5 +40,6 @@ public class ReportTask {
     public String getStatus() { return status; } public void setStatus(String value) { status = value; }
     public String getDescription() { return description; } public void setDescription(String value) { description = value; }
     public Set<User> getAssignees() { return assignees; } public void setAssignees(Set<User> value) { assignees = value; }
+    public Set<Department> getTargetDepartments() { return targetDepartments; } public void setTargetDepartments(Set<Department> value) { targetDepartments = value; }
     public LocalDateTime getCreatedAt() { return createdAt; } public LocalDateTime getUpdatedAt() { return updatedAt; }
 }

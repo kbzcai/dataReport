@@ -9,9 +9,12 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+    private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
     @ExceptionHandler(ApiException.class)
     ResponseEntity<Map<String, Object>> api(ApiException e) { return response(e.getStatus(), e.getMessage()); }
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -21,7 +24,10 @@ public class ApiExceptionHandler {
     }
     @ExceptionHandler(AccessDeniedException.class) ResponseEntity<Map<String, Object>> denied() { return response(HttpStatus.FORBIDDEN, "Permission denied"); }
     @ExceptionHandler(AuthenticationException.class) ResponseEntity<Map<String, Object>> auth() { return response(HttpStatus.UNAUTHORIZED, "Invalid username or password"); }
-    @ExceptionHandler(Exception.class) ResponseEntity<Map<String, Object>> other(Exception e) { return response(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error"); }
+    @ExceptionHandler(Exception.class) ResponseEntity<Map<String, Object>> other(Exception e) {
+        log.error("Unhandled API exception", e);
+        return response(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
+    }
     private ResponseEntity<Map<String, Object>> response(HttpStatus status, String message) {
         return ResponseEntity.status(status).body(Map.of("timestamp", LocalDateTime.now().toString(), "status", status.value(), "message", message));
     }
