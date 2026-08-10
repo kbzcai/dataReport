@@ -4,7 +4,11 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "report_record", indexes = @Index(name = "idx_record_template_reporter", columnList = "template_id,reporter_id"))
+@Table(name = "report_record", indexes = {
+        @Index(name = "idx_record_template_reporter", columnList = "template_id,reporter_id"),
+        @Index(name = "idx_record_task_status", columnList = "task_id,status"),
+        @Index(name = "idx_record_task_reporter_status", columnList = "task_id,reporter_id,status")
+})
 public class ReportRecord {
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY) private Long id;
     @ManyToOne(optional = false, fetch = FetchType.LAZY) @JoinColumn(name = "template_id") private ReportTemplate template;

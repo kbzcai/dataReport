@@ -2,6 +2,7 @@ package com.sjtb.reporting.service;
 
 import com.sjtb.reporting.dto.ReportDtos;
 import com.sjtb.reporting.dto.TemplateDtos;
+import com.sjtb.reporting.domain.ReportTask;
 import com.sjtb.reporting.exception.ApiException;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -12,17 +13,24 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class ReportExportService {
-    private final ReportService reports; private final TemplateService templates;
-    public ReportExportService(ReportService reports, TemplateService templates) { this.reports = reports; this.templates = templates; }
+    private final ReportService reports; private final TemplateService templates; private final TaskService tasks;
+    public ReportExportService(ReportService reports, TemplateService templates, TaskService tasks) { this.reports = reports; this.templates = templates; this.tasks = tasks; }
+    @Transactional(readOnly = true)
     public byte[] export(Long templateId, Long taskId) {
         if (templateId == null) throw new ApiException(HttpStatus.BAD_REQUEST, "A template is required for Excel export");
+        ReportTask task = null;
+        if (taskId != null) {
+            task = tasks.find(taskId);
+            if (task.getTemplate() == null || !templateId.equals(task.getTemplate().getId())) throw new ApiException(HttpStatus.BAD_REQUEST, "Task does not belong to template");
+        }
         List<ReportDtos.Response> data = reports.list(templateId).stream().filter(record -> taskId == null || taskId.equals(record.taskId())).toList();
         TemplateDtos.Response template = templates.get(templateId);
-        List<TemplateDtos.Column> columns = taskId != null && !data.isEmpty()
-                ? templates.columns(templates.findVersion(data.get(0).templateVersionId())) : template.columns();
+        List<TemplateDtos.Column> columns = task != null && task.getTemplateVersion() != null
+                ? templates.columns(task.getTemplateVersion()) : template.columns();
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet(template.name()); Row header = sheet.createRow(0); int column = 0;
             for (String title : List.of("任务", "填报人", "状态", "提交时间")) header.createCell(column++).setCellValue(title);

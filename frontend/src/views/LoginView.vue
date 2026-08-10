@@ -24,7 +24,6 @@ async function submit() {
           ? '/reports/import'
           : '/my-reports'
     await router.replace(destination)
-    if (router.currentRoute.value.path !== destination) window.location.replace(destination)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '登录失败'
   } finally { submitting.value = false }

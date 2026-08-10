@@ -24,15 +24,17 @@ export const confirmTemplateImport = (file: File, names: string[]) => {
   form.append('names', JSON.stringify(names))
   return http.post<unknown, Template[]>('/templates/import-confirm', form)
 }
-export async function downloadTemplate(id: Template['id'], name = `template-${id}`) {
-  const blob = await http.get<unknown, Blob>(`/templates/${id}/download`, { responseType: 'blob' })
+async function downloadBlob(path: string, name: string) {
+  const blob = await http.get<unknown, Blob>(path, { responseType: 'blob' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  const safeName = name.replace(/[\\/:*?"<>|]/g, '_').trim() || `template-${id}`
+  const safeName = name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'template-download.xlsx'
   link.download = `${safeName}.xlsx`
   document.body.appendChild(link)
   link.click()
   link.remove()
   URL.revokeObjectURL(url)
 }
+export const downloadTemplate = (id: Template['id'], name = `template-${id}`) => downloadBlob(`/templates/${id}/download`, name)
+export const downloadTemplateImportSample = () => downloadBlob('/templates/import-sample', '模板导入样例')

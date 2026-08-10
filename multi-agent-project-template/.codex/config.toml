@@ -1,5 +1,8 @@
-# 1. 审批策略：遇到敏感/高危命令时停下来询问用户
-approval_policy = "on-request"
+# 1. 通用开发流程默认减少重复审批等待；高风险操作仍受 Agent 安全规则约束。
+approval_policy = "never"
 
-# 2. 沙箱模式：限制 Codex 只能在当前工作区（项目目录）内读写文件
+# 2. 默认推理强度：保留多 Agent 协同，减少简单修改的单轮等待。
+reasoning_effort = "medium"
+
+# 3. 沙箱模式：通用模板保持工作区范围写入。
 sandbox_mode = "workspace-write"

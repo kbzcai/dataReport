@@ -10,16 +10,18 @@ import MyReportsView from '../views/MyReportsView.vue'
 import ApprovalView from '../views/ApprovalView.vue'
 import ReminderView from '../views/ReminderView.vue'
 import AnalyticsView from '../views/AnalyticsView.vue'
+import TaskScheduleView from '../views/TaskScheduleView.vue'
 import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/login', component: LoginView, meta: { public: true } },
+    { path: '/login', name: 'login', component: LoginView, meta: { public: true } },
     {
       path: '/', component: AppLayout, children: [
         { path: '', redirect: '/reports/import' },
         { path: 'templates', component: TemplateView, meta: { roles: ['MAINTAINER', 'ADMIN'] } },
+        { path: 'task-schedules', component: TaskScheduleView, meta: { roles: ['MAINTAINER', 'ADMIN'] } },
         { path: 'users', component: UserManageView, meta: { roles: ['ADMIN'] } },
         { path: 'tasks', component: TaskView, meta: { roles: ['LEADER', 'ADMIN'] } },
         { path: 'my-reports', component: MyReportsView, meta: { roles: ['REPORTER'] } },
@@ -46,6 +48,7 @@ function defaultPath(roles: string[], permissions: string[]) {
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (!auth.initialized) await auth.loadUser()
+  if (to.name === 'login' && !auth.loggedIn) return true
   if (to.meta.public) return auth.loggedIn ? defaultPath(auth.roles, auth.permissions) : true
   if (!auth.loggedIn) return '/login'
   const roles = to.meta.roles as string[] | undefined

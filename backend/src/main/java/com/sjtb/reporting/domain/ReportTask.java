@@ -20,6 +20,8 @@ public class ReportTask {
     @Column(nullable = false) private boolean allowLate = false;
     @Column(nullable = false, length = 20) private String status = "DRAFT";
     @Column(length = 500) private String description;
+    @Column(nullable = false, length = 16) private String sourceType = "MANUAL";
+    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "schedule_id") private ReportTaskSchedule schedule;
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(name = "report_task_assignee", joinColumns = @JoinColumn(name = "task_id"), inverseJoinColumns = @JoinColumn(name = "user_id"))
     private Set<User> assignees = new HashSet<>();
@@ -39,6 +41,9 @@ public class ReportTask {
     public boolean isAllowLate() { return allowLate; } public void setAllowLate(boolean value) { allowLate = value; }
     public String getStatus() { return status; } public void setStatus(String value) { status = value; }
     public String getDescription() { return description; } public void setDescription(String value) { description = value; }
+    public String getSourceType() { return sourceType; } public void setSourceType(String value) { sourceType = value; }
+    public ReportTaskSchedule getSchedule() { return schedule; } public void setSchedule(ReportTaskSchedule value) { schedule = value; }
+    public boolean isScheduled() { return "SCHEDULED".equals(sourceType); }
     public Set<User> getAssignees() { return assignees; } public void setAssignees(Set<User> value) { assignees = value; }
     public Set<Department> getTargetDepartments() { return targetDepartments; } public void setTargetDepartments(Set<Department> value) { targetDepartments = value; }
     public LocalDateTime getCreatedAt() { return createdAt; } public LocalDateTime getUpdatedAt() { return updatedAt; }

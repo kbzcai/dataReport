@@ -31,6 +31,22 @@ public class ExcelService {
             workbook.write(out); return out.toByteArray();
         } catch (IOException e) { throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "Cannot create Excel template"); }
     }
+
+    /** Returns a header-only workbook that can be imported as a new template. */
+    public byte[] templateImportSample() {
+        try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Sheet sheet = workbook.createSheet("模板样例");
+            Row header = sheet.createRow(0);
+            header.createCell(0).setCellValue("单位名称");
+            header.createCell(1).setCellValue("填报日期");
+            header.createCell(2).setCellValue("本期金额");
+            for (int i = 0; i < 3; i++) sheet.setColumnWidth(i, 20 * 256);
+            workbook.write(out);
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "Cannot create template import sample");
+        }
+    }
     public TemplateDtos.Response importTemplate(String code, String name, String description, MultipartFile file) {
         if (code == null || !code.matches("[A-Za-z][A-Za-z0-9_-]{1,63}") || name == null || name.isBlank()) throw new ApiException(HttpStatus.BAD_REQUEST, "Template code and name are required");
         if (file == null || file.isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "Excel file is required");

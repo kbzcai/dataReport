@@ -1,114 +1,425 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import {
+  NAlert, NButton, NCard, NCollapse, NCollapseItem, NDataTable, NEmpty, NForm, NFormItem,
+  NIcon, NInput, NInputNumber, NSelect, NSpace, NSteps, NStep, NTabPane, NTabs, NTag, NUpload, NDatePicker,
+  type DataTableColumns, type UploadFileInfo,
+} from 'naive-ui'
+import { AddOutline, CloudUploadOutline, DownloadOutline, TrashOutline } from '@vicons/ionicons5'
 import { downloadTemplate, listTemplates } from '../api/templates'
 import { confirmImport, createReports, downloadImportErrors, importPreview, importReport, listImportBatches, type ImportBatch, type ImportSheetPreview } from '../api/reports'
-import { listTasks } from '../api/tasks'
-import type { ReportTask, Template } from '../types'
+import { listTaskReminders, listTasks, type TaskReminder } from '../api/tasks'
+import { useAuthStore } from '../stores/auth'
+import type { ReportTask, Template, TemplateColumn } from '../types'
+import '../styles/report-import.css'
 
+type RowData = Record<string, string>
+type SheetPreview = ImportSheetPreview & { templateId: string }
+
+const route = useRoute()
+const auth = useAuthStore()
 const templates = ref<Template[]>([])
 const tasks = ref<ReportTask[]>([])
-const importMode = ref<'manual' | 'auto'>('manual')
-const templateId = ref('')
-const importTaskId = ref('')
-const manualTaskId = ref('')
-const file = ref<File | null>(null)
-const previewSheets = ref<Array<ImportSheetPreview & { templateId: string }>>([])
+const reminders = ref<TaskReminder[]>([])
 const importBatches = ref<ImportBatch[]>([])
+const selectedTaskId = ref('')
+const independentTemplateId = ref('')
+const activeTab = ref<'online' | 'excel'>('online')
+const manualRows = ref<RowData[]>([])
+const rowErrors = ref<Record<number, Record<string, string>>>({})
+const uploadFiles = ref<UploadFileInfo[]>([])
+const selectedFile = ref<File | null>(null)
+const autoMatch = ref(false)
+const previewSheets = ref<SheetPreview[]>([])
 const previewing = ref(false)
-const manualRows = ref<Record<string, string>[]>([])
 const uploading = ref(false)
 const saving = ref(false)
 const message = ref('')
 const error = ref('')
-const selectedTemplate = computed(() => templates.value.find((item) => String(item.id) === templateId.value))
+
+const reporterOnly = computed(() => auth.hasRole('REPORTER') && !auth.hasRole('ADMIN') && !auth.hasRole('LEADER'))
 const publishedTasks = computed(() => tasks.value.filter((task) => task.status?.toUpperCase() === 'PUBLISHED'))
-const selectedManualTask = computed(() => publishedTasks.value.find((task) => String(task.id) === manualTaskId.value))
-const selectedImportTask = computed(() => publishedTasks.value.find((task) => String(task.id) === importTaskId.value))
+const selectedTask = computed(() => publishedTasks.value.find((task) => String(task.id) === selectedTaskId.value))
+const selectedTemplate = computed(() => {
+  const id = selectedTask.value?.templateId ?? (reporterOnly.value ? undefined : independentTemplateId.value)
+  return templates.value.find((item) => String(item.id) === String(id))
+})
+const templateOptions = computed(() => templates.value.map((template) => ({ label: template.name, value: String(template.id) })))
+const selectedReminder = computed(() => reminders.value.find((item) => String(item.taskId) === selectedTaskId.value))
+const taskIsOverdue = computed(() => selectedReminder.value?.level === 'OVERDUE' || isOverdue(selectedTask.value?.deadline))
+const taskSubmissionBlocked = computed(() => Boolean(selectedTask.value && taskIsOverdue.value && (reporterOnly.value || !selectedTask.value.allowLate)))
+const taskStatus = computed(() => {
+  if (!selectedTask.value) return reporterOnly.value ? '请选择已发布任务' : '自主填报'
+  if (taskIsOverdue.value) return reporterOnly.value || !selectedTask.value.allowLate ? '已逾期，已关闭' : '已逾期，可补报'
+  if (selectedReminder.value?.level === 'DUE_SOON') return '即将截止'
+  return '待填报'
+})
+const importStep = computed(() => autoMatch.value ? (previewSheets.value.length ? 3 : selectedFile.value ? 2 : 1) : selectedFile.value ? 2 : 1)
+
+function msg(caught: unknown) { return caught instanceof Error ? caught.message : '操作失败，请稍后重试' }
+function date(value?: string) { return value ? value.replace('T', ' ').replace(/\.\d+$/, '') : '未设置' }
+function isOverdue(value?: string) { return Boolean(value && new Date(value).getTime() < Date.now()) }
+function deadlineTone(task: ReportTask) { return isOverdue(task.deadline) ? 'error' : reminders.value.find((item) => String(item.taskId) === String(task.id))?.level === 'DUE_SOON' ? 'warning' : 'success' }
+function taskLabel(task: ReportTask) { return `${task.name}${task.periodLabel ? `（${task.periodLabel}）` : ''}` }
+function detailProgressLabel(task?: ReportTask) {
+  const progress = task?.detailProgress
+  if (!progress || !progress.totalRows) return '尚未填报明细'
+  const parts = [`已填 ${progress.totalRows} 行`]
+  if (progress.draftRows) parts.push(`草稿 ${progress.draftRows}`)
+  if (progress.submittedRows) parts.push(`已提交 ${progress.submittedRows}`)
+  if (progress.returnedRows) parts.push(`已退回 ${progress.returnedRows}`)
+  if (progress.approvedRows) parts.push(`已通过 ${progress.approvedRows}`)
+  return parts.join(' · ')
+}
+async function refreshTasks() { tasks.value = await listTasks() }
+function newRow(): RowData {
+  const row: RowData = {}
+  selectedTemplate.value?.columns?.forEach((column) => { row[column.key] = column.defaultValue || '' })
+  return row
+}
+function clearImportState() {
+  uploadFiles.value = []
+  selectedFile.value = null
+  previewSheets.value = []
+  previewing.value = false
+}
+function resetManualRows() {
+  manualRows.value = selectedTemplate.value?.columns?.length ? [newRow()] : []
+  rowErrors.value = {}
+}
+function selectTask(taskId: string | number) {
+  clearImportState()
+  autoMatch.value = false
+  selectedTaskId.value = String(taskId)
+  activeTab.value = 'online'
+  message.value = ''
+  error.value = ''
+}
+function chooseIndependent() {
+  if (reporterOnly.value) return
+  clearImportState()
+  autoMatch.value = false
+  selectedTaskId.value = ''
+  activeTab.value = 'online'
+  message.value = ''
+  error.value = ''
+}
+function addRow() { manualRows.value.push(newRow()) }
+function removeRow(index: number) {
+  if (manualRows.value.length <= 1) return
+  manualRows.value.splice(index, 1)
+  rowErrors.value = {}
+}
+function getOptions(column: TemplateColumn) { return (column.options || []).map((option) => ({ label: option, value: option })) }
+function fieldError(column: TemplateColumn, value: unknown) {
+  const text = String(value ?? '').trim()
+  if (column.required && !text) return '必填'
+  if (!text) return ''
+  if (column.maxLength && text.length > column.maxLength) return `最多 ${column.maxLength} 个字符`
+  if (column.type === 'number' || column.type === 'money') {
+    const number = Number(text)
+    if (Number.isNaN(number)) return '请输入数字'
+    if (column.minValue !== undefined && number < Number(column.minValue)) return `不得小于 ${column.minValue}`
+    if (column.maxValue !== undefined && number > Number(column.maxValue)) return `不得大于 ${column.maxValue}`
+    if (column.scale !== undefined && !/^[-+]?\d+(\.\d+)?$/.test(text)) return '请输入有效数字'
+    if (column.scale !== undefined && (text.split('.')[1]?.length || 0) > column.scale) return `最多 ${column.scale} 位小数`
+  }
+  if (column.type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(text)) return '请输入有效日期（YYYY-MM-DD）'
+  if (column.type === 'date') { const parsed = new Date(`${text}T00:00:00`); if (Number.isNaN(parsed.getTime()) || `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}` !== text) return '请输入有效日期' }
+  if (column.type === 'month' && !/^\d{4}-(0[1-9]|1[0-2])$/.test(text)) return '请输入有效月份（YYYY-MM）'
+  if (column.type === 'year' && !/^\d{4}$/.test(text)) return '请输入有效年份（YYYY）'
+  if (column.type === 'multiselect') {
+    const values = text.split(',').map((item) => item.trim()).filter(Boolean)
+    if (!values.length && column.required) return '必填'
+    if (column.options?.length && values.some((item) => !column.options!.includes(item))) return '请选择有效选项'
+  } else if (column.options?.length && !column.options.includes(text)) return '请选择有效选项'
+  if (column.pattern) {
+    try { if (!new RegExp(column.pattern).test(text)) return '格式不符合要求' } catch { return '模板正则配置无效' }
+  }
+  return ''
+}
+function validateRow(row: RowData, index: number) {
+  const errors: Record<string, string> = {}
+  selectedTemplate.value?.columns?.forEach((column) => {
+    const result = fieldError(column, row[column.key])
+    if (result) errors[column.key] = result
+  })
+  if (Object.keys(errors).length) rowErrors.value = { ...rowErrors.value, [index]: errors }
+  else {
+    const next = { ...rowErrors.value }
+    delete next[index]
+    rowErrors.value = next
+  }
+  return !Object.keys(errors).length
+}
+function updateValue(row: RowData, rowIndex: number, column: TemplateColumn, value: unknown) {
+  row[column.key] = value === null || value === undefined ? '' : Array.isArray(value) ? value.join(',') : String(value)
+  validateRow(row, rowIndex)
+}
+function datePickerValue(value: string, type: 'date' | 'month' | 'year') {
+  if (!value) return null
+  const parsed = type === 'year' ? new Date(`${value}-01-01T00:00:00`) : type === 'month' ? new Date(`${value}-01T00:00:00`) : new Date(`${value}T00:00:00`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed.getTime()
+}
+function dateType(value?: string): 'date' | 'month' | 'year' {
+  return value === 'month' || value === 'year' ? value : 'date'
+}
+function datePickerText(value: number | null, type: 'date' | 'month' | 'year') {
+  if (!value) return ''
+  const dateValue = new Date(value)
+  const year = dateValue.getFullYear()
+  if (type === 'year') return String(year)
+  const month = String(dateValue.getMonth() + 1).padStart(2, '0')
+  if (type === 'month') return `${year}-${month}`
+  return `${year}-${month}-${String(dateValue.getDate()).padStart(2, '0')}`
+}
+function renderEditor(row: RowData, rowIndex: number, column: TemplateColumn) {
+  const errorText = rowErrors.value[rowIndex]?.[column.key]
+  const component = column.options?.length
+    ? h(NSelect, { value: column.type === 'multiselect' ? row[column.key].split(',').filter(Boolean) : row[column.key], options: getOptions(column), multiple: column.type === 'multiselect', clearable: !column.required, onUpdateValue: (value) => updateValue(row, rowIndex, column, value) })
+    : column.type === 'number' || column.type === 'money'
+      ? h(NInputNumber, { value: row[column.key] === '' ? null : Number(row[column.key]), min: column.minValue === undefined ? undefined : Number(column.minValue), max: column.maxValue === undefined ? undefined : Number(column.maxValue), showButton: false, onUpdateValue: (value) => updateValue(row, rowIndex, column, value) })
+      : ['date', 'month', 'year'].includes(column.type || '')
+        ? h(NDatePicker, { value: datePickerValue(row[column.key], dateType(column.type)), type: dateType(column.type), clearable: !column.required, onUpdateValue: (value: number | null) => updateValue(row, rowIndex, column, datePickerText(value, dateType(column.type))) })
+      : h(NInput, { value: row[column.key], type: column.type === 'textarea' ? 'textarea' : 'text', maxlength: column.maxLength, placeholder: column.required ? '请输入必填内容' : '可选', onUpdateValue: (value) => updateValue(row, rowIndex, column, value) })
+  return h('div', { class: 'report-cell-editor' }, [component, errorText ? h('small', { class: 'field-error' }, errorText) : null])
+}
+const manualColumns = computed<DataTableColumns<RowData>>(() => [
+  { title: '#', key: '__index', width: 58, fixed: 'left', render: (_, index) => String(index + 1) },
+  ...(selectedTemplate.value?.columns || []).map((column) => ({
+    title: () => h('span', { class: 'report-column-title' }, [column.label, column.required ? h('em', {}, ' *') : null]),
+    key: column.key,
+    minWidth: 180,
+    render: (row: RowData, index: number) => renderEditor(row, index, column),
+  })),
+  { title: '操作', key: '__actions', width: 76, fixed: 'right', render: (_, index) => h(NButton, { text: true, type: 'error', disabled: manualRows.value.length === 1, onClick: () => removeRow(index) }, { icon: () => h(NIcon, null, { default: () => h(TrashOutline) }) }) },
+])
+const batchColumns: DataTableColumns<ImportBatch> = [
+  { title: '文件', key: 'originalFileName', minWidth: 180 },
+  { title: '时间', key: 'createdAt', width: 165, render: (row) => date(row.createdAt) },
+  { title: '结果', key: 'result', width: 120, render: (row) => `${row.importedRows} 成功 / ${row.failedRows} 失败` },
+  { title: '状态', key: 'status', width: 100, render: (row) => h(NTag, { type: row.failedRows ? 'warning' : 'success', size: 'small', bordered: false }, { default: () => row.status }) },
+  { title: '摘要', key: 'summary', minWidth: 180, ellipsis: { tooltip: true } },
+  { title: '操作', key: 'action', width: 105, render: (row) => row.failedRows > 0 ? h(NButton, { text: true, type: 'primary', onClick: () => downloadImportErrors(row.id) }, { default: () => '下载错误' }) : '-' },
+]
+async function download() {
+  if (!selectedTemplate.value) return
+  try { await downloadTemplate(selectedTemplate.value.id, selectedTemplate.value.name) } catch (caught) { error.value = msg(caught) }
+}
+function updateUpload(files: UploadFileInfo[]) {
+  uploadFiles.value = files.slice(-1)
+  selectedFile.value = uploadFiles.value[0]?.file || null
+  previewSheets.value = []
+  message.value = ''
+  error.value = ''
+  if (autoMatch.value && selectedFile.value) previewWorkbook()
+}
+async function previewWorkbook() {
+  if (!selectedFile.value) { error.value = '请选择 Excel 文件'; return }
+  previewing.value = true
+  error.value = ''
+  try {
+    const result = await importPreview(selectedFile.value)
+    previewSheets.value = result.sheets.map((sheet) => ({ ...sheet, templateId: sheet.suggestedTemplateId ? String(sheet.suggestedTemplateId) : '' }))
+  } catch (caught) { error.value = msg(caught) } finally { previewing.value = false }
+}
+async function submitImport() {
+  if (!selectedFile.value) { error.value = '请选择填写完成的 Excel 文件'; return }
+  if (reporterOnly.value && !selectedTask.value) { error.value = '请选择已发布的填报任务'; return }
+  if (!autoMatch.value && !selectedTemplate.value) { error.value = '请选择填报任务或自主填报模板'; return }
+  if (taskSubmissionBlocked.value) { error.value = reporterOnly.value ? '该任务已逾期，无法提交' : '该任务已逾期且不允许补报，无法提交'; return }
+  if (autoMatch.value && !previewSheets.value.length) { await previewWorkbook(); return }
+  if (autoMatch.value && previewSheets.value.some((sheet) => !sheet.templateId)) { error.value = '请为每个工作表选择导入模板'; return }
+  uploading.value = true
+  error.value = ''
+  try {
+    const result = autoMatch.value
+      ? await confirmImport(selectedFile.value, previewSheets.value.map((sheet) => sheet.templateId))
+      : await importReport(selectedTemplate.value!.id, selectedFile.value, selectedTask.value?.id)
+    message.value = `导入批次 ${result.batchId} 已完成：成功 ${result.importedRows} 行，失败 ${result.failedRows} 行`
+    clearImportState()
+    try {
+      const [loadedBatches] = await Promise.all([listImportBatches(), refreshTasks()])
+      importBatches.value = loadedBatches
+    } catch {
+      // 导入已经成功，列表刷新失败不应覆盖成功结果。
+    }
+  } catch (caught) { error.value = msg(caught) } finally { uploading.value = false }
+}
+async function submitManual() {
+  if (reporterOnly.value && !selectedTask.value) { error.value = '请选择已发布的填报任务'; return }
+  if (!selectedTemplate.value) { error.value = '请选择填报任务或自主填报模板'; return }
+  if (taskSubmissionBlocked.value) { error.value = reporterOnly.value ? '该任务已逾期，无法提交' : '该任务已逾期且不允许补报，无法提交'; return }
+  const valid = manualRows.value.map((row, index) => validateRow(row, index)).every(Boolean)
+  if (!valid) { error.value = '请修正标红的字段后再提交'; return }
+  saving.value = true
+  error.value = ''
+  try {
+    await createReports(manualRows.value.map((data) => ({ templateId: selectedTemplate.value!.id, taskId: selectedTask.value?.id, data, status: 'SUBMITTED' })))
+    message.value = `已提交 ${manualRows.value.length} 行填报数据`
+    resetManualRows()
+    try { await refreshTasks() } catch {
+      // 提交已成功，稍后刷新页面即可重新获取最新明细进度。
+    }
+  } catch (caught) { error.value = msg(caught) } finally { saving.value = false }
+}
 async function load() {
   try {
     const [loadedTemplates, loadedTasks, loadedBatches] = await Promise.all([listTemplates(), listTasks(), listImportBatches()])
     templates.value = loadedTemplates
     tasks.value = loadedTasks
     importBatches.value = loadedBatches
-    if (!templateId.value && templates.value.length) templateId.value = String(templates.value[0].id)
-  } catch (e) { error.value = msg(e) }
+    const queryTaskId = route.query.taskId
+    if (typeof queryTaskId === 'string' && publishedTasks.value.some((task) => String(task.id) === queryTaskId)) selectedTaskId.value = queryTaskId
+  } catch (caught) { error.value = msg(caught) }
+  try { reminders.value = await listTaskReminders() } catch { reminders.value = [] }
 }
-function newRow() { const row: Record<string, string> = {}; selectedTemplate.value?.columns?.forEach((column) => { row[column.key] = '' }); return row }
-function resetManualRows() { manualRows.value = selectedTemplate.value?.columns?.length ? [newRow()] : [] }
 watch(selectedTemplate, resetManualRows)
-watch(manualTaskId, (taskId) => {
-  const task = publishedTasks.value.find((item) => String(item.id) === taskId)
-  if (task) {
-    importTaskId.value = ''
-    templateId.value = String(task.templateId)
+watch(() => route.query.taskId, (taskId) => {
+  if (typeof taskId === 'string' && publishedTasks.value.some((task) => String(task.id) === taskId)) selectTask(taskId)
+})
+watch(autoMatch, (enabled) => {
+  if (enabled && reporterOnly.value) {
+    autoMatch.value = false
+    return
+  }
+  if (enabled) {
+    // 自动匹配是无任务导入，避免沿用已选任务的截止时间和任务编号语义。
+    selectedTaskId.value = ''
+    independentTemplateId.value = ''
+    if (selectedFile.value && !previewSheets.value.length) previewWorkbook()
+  } else {
+    previewSheets.value = []
   }
 })
-watch(importTaskId, (taskId) => {
-  const task = publishedTasks.value.find((item) => String(item.id) === taskId)
-  if (task) {
-    manualTaskId.value = ''
-    templateId.value = String(task.templateId)
-  }
-})
-watch(templateId, () => {
-  if (manualTaskId.value && String(selectedManualTask.value?.templateId) !== templateId.value) manualTaskId.value = ''
-  if (importTaskId.value && String(selectedImportTask.value?.templateId) !== templateId.value) importTaskId.value = ''
-})
-function addRow() { manualRows.value.push(newRow()) }
-function removeRow(index: number) { if (manualRows.value.length > 1) manualRows.value.splice(index, 1) }
-async function chooseFile(event: Event) {
-  file.value = (event.target as HTMLInputElement).files?.[0] || null
-  previewSheets.value = []
-  message.value = ''
-  error.value = ''
-  if (file.value && importMode.value === 'auto') await previewWorkbook()
-}
-async function download() { if (!selectedTemplate.value) return; try { await downloadTemplate(selectedTemplate.value.id, selectedTemplate.value.name) } catch (e) { error.value = msg(e) } }
-async function previewWorkbook() {
-  if (!file.value) { error.value = '请选择 Excel 文件'; return }
-  error.value = ''; message.value = ''; previewing.value = true
-  try {
-    const result = await importPreview(file.value)
-    previewSheets.value = result.sheets.map((sheet) => ({ ...sheet, templateId: sheet.suggestedTemplateId ? String(sheet.suggestedTemplateId) : '' }))
-  } catch (e) { error.value = msg(e) } finally { previewing.value = false }
-}
-watch(importMode, (mode) => { if (mode === 'auto' && file.value && !previewSheets.value.length) previewWorkbook() })
-async function submitImport() {
-  if (importMode.value === 'manual' && !templateId.value) { error.value = '手工指定模式下请选择填报模板'; return }
-  if (!file.value) { error.value = '请选择填写完成的 Excel 文件'; return }
-  if (importMode.value === 'auto') {
-    if (!previewSheets.value.length) { await previewWorkbook(); return }
-    if (previewSheets.value.some((sheet) => !sheet.templateId)) { error.value = '请为每个工作表选择模板后再确认导入'; return }
-  }
-  error.value = ''; message.value = ''; uploading.value = true
-  try {
-    const result = importMode.value === 'auto' ? await confirmImport(file.value, previewSheets.value.map((sheet) => sheet.templateId)) : await importReport(templateId.value, file.value, importTaskId.value || undefined)
-    message.value = `导入批次 ${result.batchId} 已完成：成功 ${result.importedRows} 行，失败 ${result.failedRows} 行`; file.value = null; previewSheets.value = []; importBatches.value = await listImportBatches()
-  } catch (e) { error.value = msg(e) } finally { uploading.value = false }
-}
-async function submitManual() {
-  if (!templateId.value || !selectedTemplate.value) { error.value = '请选择填报模板'; return }
-  if (!manualRows.value.length) { error.value = '请先新增填报行'; return }
-  const required = selectedTemplate.value.columns?.filter((column) => column.required) || []
-  const invalid = manualRows.value.some((row) => required.some((column) => !String(row[column.key] ?? '').trim()))
-  if (invalid) { error.value = '请填写每一行的必填字段'; return }
-  error.value = ''; message.value = ''; saving.value = true
-  try { await createReports(manualRows.value.map((row) => ({ templateId: templateId.value, taskId: manualTaskId.value || undefined, data: row, status: 'SUBMITTED' }))); message.value = `已提交 ${manualRows.value.length} 行填报数据`; resetManualRows() } catch (e) { error.value = msg(e) } finally { saving.value = false }
-}
-function msg(e: unknown) { return e instanceof Error ? e.message : '操作失败' }
-function date(value?: string) { return value ? value.replace('T', ' ').replace(/\.\d+$/, '') : '-' }
 onMounted(load)
 </script>
 
 <template>
-  <section>
-    <div class="page-heading"><div><h1>数据填报</h1><p>可下载模板导入，也可在动态表格中连续录入多行数据。</p></div></div>
-    <div v-if="message" class="notice success">{{ message }}</div><div v-if="error" class="notice error">{{ error }}</div>
-    <div class="import-panel">
-      <div class="step"><span>1</span><div><h2>选择导入模式</h2><div class="mode-options"><label class="mode-option" :class="{ active: importMode === 'manual' }"><input v-model="importMode" type="radio" value="manual" /> <span><strong>指定单个模板</strong><small>选择模板后，所有非空工作表按同一模板校验</small></span></label><label class="mode-option" :class="{ active: importMode === 'auto' }"><input v-model="importMode" type="radio" value="auto" /> <span><strong>按工作表自动匹配</strong><small>一个 Excel 可包含多个工作表，每个工作表对应一个模板</small></span></label></div><div v-if="importMode === 'manual'" class="template-picker"><select v-model="importTaskId" class="task-select"><option value="">不关联填报任务（可选）</option><option v-for="task in publishedTasks" :key="task.id" :value="String(task.id)">{{ task.name }}{{ task.periodLabel ? `（${task.periodLabel}）` : '' }} - {{ task.templateName || '关联模板' }}</option></select><select v-model="templateId" :disabled="Boolean(importTaskId || manualTaskId)"><option value="">请选择模板</option><option v-for="item in templates" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select><button v-if="selectedTemplate" type="button" class="download" @click="download">下载{{ selectedTemplate.name }}模板</button><p v-if="selectedTemplate" class="hint">仅显示已发布任务；选择任务后将自动锁定其关联模板。文件名与模板名称一致，导入表头必须与模板完全一致。</p></div><p v-else class="hint auto-hint">无需选择模板。请确保每个工作表名称或表头能唯一匹配已启用模板；多工作表导入不关联单个填报任务。</p></div></div>
-      <div class="step"><span>2</span><div><h2>Excel 导入</h2><input type="file" accept=".xlsx,.xls" @change="chooseFile" /><p class="hint">自动匹配模式选择文件后会识别非空工作表及其顺序，请确认每个工作表对应的模板名称后再提交。</p><div v-if="importMode === 'auto' && previewSheets.length" class="sheet-preview"><div class="preview-title">识别到 {{ previewSheets.length }} 个非空工作表，导入顺序如下</div><table><thead><tr><th>顺序</th><th>工作表</th><th>建议匹配</th><th>导入模板</th></tr></thead><tbody><tr v-for="sheet in previewSheets" :key="sheet.sheetIndex"><td>{{ sheet.sheetOrder + 1 }}</td><td>{{ sheet.sheetName }}</td><td>{{ sheet.matchStatus === 'NAME' ? '名称匹配' : sheet.matchStatus === 'HEADER' ? '表头匹配' : sheet.matchStatus === 'AMBIGUOUS' ? '匹配不唯一' : '未匹配' }}<small v-if="sheet.suggestedTemplateName">建议：{{ sheet.suggestedTemplateName }}</small></td><td><select v-model="sheet.templateId"><option value="">请选择模板</option><option v-for="item in templates" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select></td></tr></tbody></table><p class="hint">可手动调整模板。请按上表顺序确认，顺序与实际导入顺序一致。</p></div><button class="primary wide" :disabled="uploading || previewing" @click="submitImport">{{ uploading ? '导入中...' : previewing ? '识别中...' : importMode === 'auto' && previewSheets.length ? '确认导入' : importMode === 'auto' ? '识别工作表' : '导入并提交' }}</button></div></div>
-      <div class="step"><span>3</span><div><div class="manual-heading"><div><h2>手工填报</h2><p class="hint">每一行代表一条填报记录，可连续新增多行。</p></div><button v-if="selectedTemplate?.columns?.length" type="button" class="secondary" @click="addRow">新增一行</button></div><label class="task-field">填报任务（可选）<select v-model="manualTaskId"><option value="">不关联填报任务</option><option v-for="task in publishedTasks" :key="task.id" :value="String(task.id)">{{ task.name }}{{ task.periodLabel ? `（${task.periodLabel}）` : '' }} - {{ task.templateName || '关联模板' }}</option></select></label><p v-if="manualTaskId" class="hint">已根据所选已发布任务自动切换到对应模板。</p><p v-if="!selectedTemplate" class="hint">选择模板后显示填报表格。</p><div v-else-if="selectedTemplate.columns?.length" class="manual-table-wrap"><table class="manual-table"><thead><tr><th>#</th><th v-for="column in selectedTemplate.columns" :key="column.key">{{ column.label }}<span v-if="column.required"> *</span></th><th>操作</th></tr></thead><tbody><tr v-for="(row, rowIndex) in manualRows" :key="rowIndex"><td>{{ rowIndex + 1 }}</td><td v-for="column in selectedTemplate.columns" :key="column.key"><textarea v-if="column.type === 'textarea'" v-model="row[column.key]" rows="1" /><input v-else v-model="row[column.key]" :type="column.type === 'number' ? 'number' : column.type === 'date' ? 'date' : column.type === 'month' ? 'month' : 'text'" /></td><td><button type="button" class="danger-button" :disabled="manualRows.length === 1" @click="removeRow(rowIndex)">删除</button></td></tr></tbody></table><button class="primary wide" :disabled="saving" @click="submitManual">{{ saving ? '提交中...' : `提交 ${manualRows.length} 行` }}</button></div><p v-else class="hint">该模板暂无字段，请联系模板管理员维护表头。</p></div></div>
-      <div class="step"><span>4</span><div><h2>导入批次</h2><p class="hint">仅展示当前用户可查看的批次；失败批次可下载错误清单。</p><div class="table-wrap"><table><thead><tr><th>文件</th><th>时间</th><th>成功/失败</th><th>状态</th><th>摘要</th><th>操作</th></tr></thead><tbody><tr v-if="!importBatches.length"><td colspan="6" class="muted">暂无导入批次。</td></tr><tr v-for="batch in importBatches" :key="batch.id"><td>{{ batch.originalFileName }}</td><td>{{ date(batch.createdAt) }}</td><td>{{ batch.importedRows }} / {{ batch.failedRows }}</td><td>{{ batch.status }}</td><td>{{ batch.summary || '-' }}</td><td><button v-if="batch.failedRows > 0" type="button" class="text-button" @click="downloadImportErrors(batch.id)">下载错误</button><span v-else>-</span></td></tr></tbody></table></div></div></div>
+  <section class="report-workbench">
+    <div class="page-heading report-heading">
+      <div><h1>数据填报</h1><p>先选择待填任务，再使用在线填报或 Excel 导入完成提交。</p></div>
     </div>
+
+    <n-alert v-if="message" type="success" closable class="workbench-notice" @close="message = ''">{{ message }}</n-alert>
+    <n-alert v-if="error" type="error" closable class="workbench-notice" @close="error = ''">{{ error }}</n-alert>
+    <n-alert v-if="selectedTask && taskIsOverdue" :type="reporterOnly || !selectedTask.allowLate ? 'error' : 'warning'" class="workbench-notice" :show-icon="true">
+      {{ reporterOnly || !selectedTask.allowLate ? '当前任务已逾期，在线填报和 Excel 导入已禁用。' : '当前任务已逾期，仍允许补报，请尽快提交。' }}
+    </n-alert>
+    <n-alert v-else-if="selectedTask && selectedReminder?.level === 'DUE_SOON'" type="warning" class="workbench-notice" :show-icon="true">该任务即将截止，请及时完成填报。</n-alert>
+
+    <n-card class="task-center" title="待填任务" :bordered="false">
+      <template #header-extra><n-tag size="small" type="info" :bordered="false">{{ publishedTasks.length }} 个任务</n-tag></template>
+      <div v-if="publishedTasks.length" class="task-list">
+        <button v-for="task in publishedTasks" :key="task.id" type="button" class="task-card" :class="{ selected: selectedTaskId === String(task.id) }" @click="selectTask(task.id)">
+          <span class="task-card-title">{{ task.name }}</span>
+          <span class="task-card-template">{{ task.templateName || '关联模板' }}{{ task.periodLabel ? ` · ${task.periodLabel}` : '' }}</span>
+          <span class="task-card-meta">截止：{{ date(task.deadline) }}</span>
+          <span class="task-card-progress">{{ detailProgressLabel(task) }}</span>
+          <n-tag size="small" :type="deadlineTone(task)" :bordered="false">{{ isOverdue(task.deadline) ? (reporterOnly || !task.allowLate ? '已逾期' : '已逾期，可补报') : reminders.find((item) => String(item.taskId) === String(task.id))?.level === 'DUE_SOON' ? '即将截止' : '待填报' }}</n-tag>
+        </button>
+      </div>
+      <n-empty v-else description="当前没有已发布的填报任务" size="small" />
+      <div v-if="!reporterOnly" class="independent-entry">
+        <n-button tertiary type="primary" @click="chooseIndependent">自主填报</n-button>
+        <span>无任务时可自行选择启用模板填报，数据不会关联到任务。</span>
+      </div>
+    </n-card>
+
+    <n-card class="selected-task-card" :bordered="false">
+      <div class="selected-task-summary">
+        <div>
+          <span class="eyebrow">{{ selectedTask ? '当前任务' : reporterOnly ? '请选择任务' : '自主填报' }}</span>
+          <h2>{{ selectedTask?.name || (reporterOnly ? '请选择已发布任务' : '选择填报模板') }}</h2>
+          <p v-if="selectedTask">{{ selectedTask.description || '请按任务要求完成本期数据填报。' }}</p>
+          <p v-else>{{ reporterOnly ? '请选择一个已发布任务后开始填报。' : '请选择一个启用模板后开始填报。' }}</p>
+        </div>
+        <div class="task-facts">
+          <span>模板：<strong>{{ selectedTemplate?.name || selectedTask?.templateName || '未选择' }}</strong></span>
+          <span>截止：<strong>{{ selectedTask ? date(selectedTask.deadline) : '-' }}</strong></span>
+          <span v-if="selectedTask">明细：<strong>{{ detailProgressLabel(selectedTask) }}</strong></span>
+          <n-tag :type="taskIsOverdue ? 'error' : selectedReminder?.level === 'DUE_SOON' ? 'warning' : 'success'" :bordered="false">{{ taskStatus }}</n-tag>
+        </div>
+      </div>
+      <n-form v-if="!selectedTask && !reporterOnly" label-placement="top" class="independent-template-form">
+        <n-form-item label="填报模板">
+          <n-select v-model:value="independentTemplateId" :options="templateOptions" placeholder="请选择启用模板" filterable clearable />
+        </n-form-item>
+      </n-form>
+    </n-card>
+
+    <n-tabs v-model:value="activeTab" type="line" animated class="report-tabs" display-directive="show">
+      <n-tab-pane name="online" tab="在线填报">
+        <n-card :bordered="false" class="entry-card">
+          <template #header><span>在线填报</span></template>
+          <template #header-extra><n-tag v-if="selectedTemplate" size="small" :bordered="false">{{ selectedTemplate.columns?.length || 0 }} 个字段</n-tag></template>
+          <n-empty v-if="!selectedTemplate" :description="reporterOnly ? '请先选择一个已发布任务' : '请先选择一个待填任务或自主填报模板'" />
+          <n-empty v-else-if="!selectedTemplate.columns?.length" description="该模板暂无字段，请联系模板管理员维护表头" />
+          <template v-else>
+            <n-data-table class="desktop-report-table" :columns="manualColumns" :data="manualRows" :bordered="false" :single-line="false" :scroll-x="Math.max(760, (selectedTemplate.columns.length + 2) * 190)" />
+            <div class="mobile-report-form">
+              <n-form v-for="(row, rowIndex) in manualRows" :key="rowIndex" label-placement="top" class="mobile-row-card">
+                <div class="mobile-row-header"><strong>第 {{ rowIndex + 1 }} 行</strong><n-button text type="error" :disabled="manualRows.length === 1" @click="removeRow(rowIndex)">删除</n-button></div>
+                <n-form-item v-for="column in selectedTemplate.columns" :key="column.key" :label="column.label" :validation-status="rowErrors[rowIndex]?.[column.key] ? 'error' : undefined" :feedback="rowErrors[rowIndex]?.[column.key]">
+                  <n-select v-if="column.options?.length" :value="column.type === 'multiselect' ? row[column.key].split(',').filter(Boolean) : row[column.key]" :options="getOptions(column)" :multiple="column.type === 'multiselect'" :clearable="!column.required" @update:value="(value) => updateValue(row, rowIndex, column, value)" />
+                  <n-input-number v-else-if="column.type === 'number' || column.type === 'money'" :value="row[column.key] === '' ? null : Number(row[column.key])" :min="column.minValue === undefined ? undefined : Number(column.minValue)" :max="column.maxValue === undefined ? undefined : Number(column.maxValue)" :show-button="false" @update:value="(value) => updateValue(row, rowIndex, column, value)" />
+                  <n-date-picker v-else-if="column.type === 'date' || column.type === 'month' || column.type === 'year'" :value="datePickerValue(row[column.key], dateType(column.type))" :type="dateType(column.type)" :clearable="!column.required" @update:value="(value) => updateValue(row, rowIndex, column, datePickerText(value, dateType(column.type)))" />
+                  <n-input v-else :value="row[column.key]" :type="column.type === 'textarea' ? 'textarea' : 'text'" :maxlength="column.maxLength" :placeholder="column.required ? '请输入必填内容' : '可选'" @update:value="(value) => updateValue(row, rowIndex, column, value)" />
+                </n-form-item>
+              </n-form>
+            </div>
+            <div class="sticky-submit-bar">
+              <n-space align="center" justify="space-between" :wrap="true">
+                <n-button :disabled="taskSubmissionBlocked" @click="addRow"><template #icon><n-icon><AddOutline /></n-icon></template>新增一行</n-button>
+                <span>已填 {{ manualRows.length }} 行</span>
+                <n-button type="primary" :loading="saving" :disabled="taskSubmissionBlocked" @click="submitManual">提交填报</n-button>
+              </n-space>
+            </div>
+          </template>
+        </n-card>
+      </n-tab-pane>
+
+      <n-tab-pane name="excel" tab="Excel 导入">
+        <n-card :bordered="false" class="entry-card">
+          <template #header>Excel 导入</template>
+          <template #header-extra><n-button v-if="selectedTemplate" text type="primary" @click="download"><template #icon><n-icon><DownloadOutline /></n-icon></template>下载模板</n-button></template>
+          <n-steps :current="importStep" size="small" class="import-steps">
+            <n-step title="上传文件" />
+            <n-step :title="autoMatch ? '解析预览' : '已选择/校验'" />
+            <n-step title="确认导入" />
+          </n-steps>
+          <n-alert v-if="!selectedTemplate && !autoMatch" type="info" class="import-alert">{{ reporterOnly ? '请先选择已发布任务，再上传对应 Excel 文件。' : '请先选择待填任务或自主填报模板，再上传对应 Excel 文件。' }}</n-alert>
+          <n-upload accept=".xlsx,.xls" :default-upload="false" :file-list="uploadFiles" :max="1" @update:file-list="updateUpload">
+            <n-button><template #icon><n-icon><CloudUploadOutline /></n-icon></template>选择 Excel 文件</n-button>
+          </n-upload>
+          <p v-if="selectedFile" class="selected-file">已选择：{{ selectedFile.name }}</p>
+          <n-alert v-if="selectedFile && !autoMatch" type="success" :show-icon="false" class="file-check-alert">文件已选择，前端已完成格式和任务状态校验，可确认导入。</n-alert>
+          <n-collapse v-if="!reporterOnly" class="advanced-import">
+            <n-collapse-item title="更多导入选项" name="advanced">
+              <n-alert type="warning" :show-icon="false">多工作表自动匹配不会关联当前任务，即使当前已选择任务，导入记录也不会带入任务编号。</n-alert>
+              <n-button :type="autoMatch ? 'primary' : 'default'" size="small" class="auto-match-button" @click="autoMatch = !autoMatch">{{ autoMatch ? '已启用多工作表自动匹配' : '启用多工作表自动匹配' }}</n-button>
+            </n-collapse-item>
+          </n-collapse>
+          <div v-if="autoMatch && previewSheets.length" class="sheet-preview-workbench">
+            <n-data-table :columns="[
+              { title: '顺序', key: 'sheetOrder', width: 72, render: (row: SheetPreview) => row.sheetOrder + 1 },
+              { title: '工作表', key: 'sheetName', minWidth: 130 },
+              { title: '识别结果', key: 'matchStatus', minWidth: 170, render: (row: SheetPreview) => `${row.matchStatus === 'NAME' ? '名称匹配' : row.matchStatus === 'HEADER' ? '表头匹配' : row.matchStatus === 'AMBIGUOUS' ? '匹配不唯一' : '未匹配'}${row.suggestedTemplateName ? ` · 建议：${row.suggestedTemplateName}` : ''}` },
+              { title: '导入模板', key: 'templateId', minWidth: 200, render: (row: SheetPreview) => h(NSelect, { value: row.templateId, options: templateOptions, placeholder: '请选择模板', onUpdateValue: (value) => { row.templateId = String(value) } }) },
+            ]" :data="previewSheets" :bordered="false" />
+          </div>
+          <div class="import-actions">
+            <n-button v-if="autoMatch" :loading="previewing" :disabled="!selectedFile" @click="previewWorkbook">解析预览</n-button>
+            <n-button type="primary" :loading="uploading" :disabled="taskSubmissionBlocked || !selectedFile" @click="submitImport">确认导入</n-button>
+          </div>
+        </n-card>
+      </n-tab-pane>
+    </n-tabs>
+
+    <n-card class="batch-card" title="导入批次" :bordered="false">
+      <template #header-extra><span class="batch-hint">失败批次可下载错误清单</span></template>
+      <n-data-table :columns="batchColumns" :data="importBatches" :bordered="false" :single-line="false" :pagination="false" />
+    </n-card>
   </section>
 </template>

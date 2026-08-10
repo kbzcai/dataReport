@@ -13,6 +13,7 @@ public class TaskController {
     private final TaskService tasks;
     public TaskController(TaskService tasks) { this.tasks = tasks; }
     @GetMapping @PreAuthorize("hasAnyRole('ADMIN','LEADER','REPORTER')") public List<TaskDtos.Response> list() { return tasks.list(); }
+    @GetMapping("/{id}/detail-progress") @PreAuthorize("hasAnyRole('ADMIN','LEADER','REPORTER')") public TaskDtos.DetailProgress detailProgress(@PathVariable Long id) { return tasks.detailProgress(id); }
     @GetMapping("/reminders") @PreAuthorize("hasRole('REPORTER')") public List<TaskDtos.Reminder> reminders() { return tasks.reminders(); }
     @GetMapping("/overview") @PreAuthorize("hasAnyRole('ADMIN','LEADER')") public TaskDtos.Overview overview() { return tasks.overview(); }
     @GetMapping("/assignable-targets") @PreAuthorize("hasAnyRole('ADMIN','LEADER')") public List<TaskDtos.AssignableTarget> assignableTargets() { return tasks.assignableTargets(); }

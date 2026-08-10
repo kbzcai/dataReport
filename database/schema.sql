@@ -70,10 +70,13 @@ CREATE TABLE IF NOT EXISTS report_task (
     allow_late TINYINT(1) NOT NULL DEFAULT 0,
     status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
   description VARCHAR(500) DEFAULT NULL,
+  source_type VARCHAR(16) NOT NULL DEFAULT 'MANUAL',
+  schedule_id BIGINT DEFAULT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_task_template_status (template_id, status),
+  KEY idx_task_schedule (schedule_id),
   CONSTRAINT fk_task_template FOREIGN KEY (template_id) REFERENCES report_template (id),
   CONSTRAINT fk_task_template_version FOREIGN KEY (template_version_id) REFERENCES report_template_version (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='填报任务';
@@ -112,6 +115,115 @@ CREATE TABLE IF NOT EXISTS report_task_detail (
   CONSTRAINT fk_task_detail_version FOREIGN KEY (template_version_id) REFERENCES report_template_version (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='个人任务明细';
 
+CREATE TABLE IF NOT EXISTS report_task_schedule (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  name VARCHAR(128) NOT NULL,
+  template_id BIGINT NOT NULL,
+  template_version_id BIGINT NOT NULL,
+  frequency VARCHAR(16) NOT NULL,
+  week_day INT DEFAULT NULL,
+  day_of_month INT DEFAULT NULL,
+  month_of_year INT DEFAULT NULL,
+  publish_time TIME NOT NULL,
+  deadline_days INT NOT NULL,
+  allow_late TINYINT(1) NOT NULL DEFAULT 0,
+  status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+  start_at DATETIME DEFAULT NULL,
+  end_at DATETIME DEFAULT NULL,
+  next_run_at DATETIME NOT NULL,
+  description VARCHAR(500) DEFAULT NULL,
+  created_by BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_task_schedule_status_next (status, next_run_at),
+  KEY idx_task_schedule_template (template_id),
+  CONSTRAINT fk_task_schedule_template FOREIGN KEY (template_id) REFERENCES report_template (id),
+  CONSTRAINT fk_task_schedule_version FOREIGN KEY (template_version_id) REFERENCES report_template_version (id),
+  CONSTRAINT fk_task_schedule_creator FOREIGN KEY (created_by) REFERENCES sys_user (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时发布规则';
+
+CREATE TABLE IF NOT EXISTS report_task_schedule_assignee (
+  schedule_id BIGINT NOT NULL,
+  user_id BIGINT NOT NULL,
+  PRIMARY KEY (schedule_id, user_id),
+  CONSTRAINT fk_schedule_assignee_schedule FOREIGN KEY (schedule_id) REFERENCES report_task_schedule (id) ON DELETE CASCADE,
+  CONSTRAINT fk_schedule_assignee_user FOREIGN KEY (user_id) REFERENCES sys_user (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时规则填报人员';
+
+CREATE TABLE IF NOT EXISTS report_task_schedule_department (
+  schedule_id BIGINT NOT NULL,
+  department_id BIGINT NOT NULL,
+  PRIMARY KEY (schedule_id, department_id),
+  CONSTRAINT fk_schedule_department_schedule FOREIGN KEY (schedule_id) REFERENCES report_task_schedule (id) ON DELETE CASCADE,
+  CONSTRAINT fk_schedule_department_department FOREIGN KEY (department_id) REFERENCES sys_department (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时规则目标部门';
+
+CREATE TABLE IF NOT EXISTS report_task_schedule_run (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  schedule_id BIGINT NOT NULL,
+  period_key VARCHAR(32) NOT NULL,
+  task_id BIGINT DEFAULT NULL,
+  status VARCHAR(16) NOT NULL,
+  error_message VARCHAR(1000) DEFAULT NULL,
+  published_at DATETIME NOT NULL,
+  executed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_schedule_run_period (schedule_id, period_key),
+  KEY idx_schedule_run_schedule_time (schedule_id, executed_at),
+  CONSTRAINT fk_schedule_run_schedule FOREIGN KEY (schedule_id) REFERENCES report_task_schedule (id) ON DELETE CASCADE,
+  CONSTRAINT fk_schedule_run_task FOREIGN KEY (task_id) REFERENCES report_task (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='定时规则执行记录';
+
+SET @task_source_type_column := (
+  SELECT COLUMN_NAME FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'report_task' AND COLUMN_NAME = 'source_type'
+  LIMIT 1
+);
+SET @sql := IF(@task_source_type_column IS NULL,
+  'ALTER TABLE report_task ADD COLUMN source_type VARCHAR(16) NOT NULL DEFAULT ''MANUAL''',
+  'SELECT 1');
+PREPARE migration_stmt FROM @sql;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+
+SET @task_schedule_column := (
+  SELECT COLUMN_NAME FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'report_task' AND COLUMN_NAME = 'schedule_id'
+  LIMIT 1
+);
+SET @sql := IF(@task_schedule_column IS NULL,
+  'ALTER TABLE report_task ADD COLUMN schedule_id BIGINT DEFAULT NULL, ADD KEY idx_task_schedule (schedule_id)',
+  'SELECT 1');
+PREPARE migration_stmt FROM @sql;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+
+SET @schedule_run_published_column := (
+  SELECT COLUMN_NAME FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'report_task_schedule_run' AND COLUMN_NAME = 'published_at'
+  LIMIT 1
+);
+SET @sql := IF(@schedule_run_published_column IS NULL,
+  'ALTER TABLE report_task_schedule_run ADD COLUMN published_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP',
+  'SELECT 1');
+PREPARE migration_stmt FROM @sql;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+
+SET @task_schedule_fk := (
+  SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+  WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'report_task'
+    AND COLUMN_NAME = 'schedule_id' AND REFERENCED_TABLE_NAME = 'report_task_schedule'
+  LIMIT 1
+);
+SET @sql := IF(@task_schedule_fk IS NULL,
+  'ALTER TABLE report_task ADD CONSTRAINT fk_task_schedule FOREIGN KEY (schedule_id) REFERENCES report_task_schedule (id)',
+  'SELECT 1');
+PREPARE migration_stmt FROM @sql;
+EXECUTE migration_stmt;
+DEALLOCATE PREPARE migration_stmt;
+
 CREATE TABLE IF NOT EXISTS report_record (
   id BIGINT NOT NULL AUTO_INCREMENT,
   template_id BIGINT NOT NULL,
@@ -125,6 +237,8 @@ CREATE TABLE IF NOT EXISTS report_record (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_record_template_reporter (template_id, reporter_id),
+  KEY idx_record_task_status (task_id, status),
+  KEY idx_record_task_reporter_status (task_id, reporter_id, status),
   KEY idx_record_updated_at (updated_at),
   CONSTRAINT fk_record_template FOREIGN KEY (template_id) REFERENCES report_template (id),
   CONSTRAINT fk_record_template_version FOREIGN KEY (template_version_id) REFERENCES report_template_version (id),

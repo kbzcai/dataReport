@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { listTemplateVersions, listTemplates } from '../api/templates'
 import { createTask, deleteTask, listAssignableTargets, listTasks, updateTask, type AssignableTarget } from '../api/tasks'
+import { exportReports } from '../api/reports'
 import type { ReportTask, Template, TemplateVersion } from '../types'
 import TaskTargetTreeNode from './TaskTargetTreeNode.vue'
 
@@ -14,6 +15,7 @@ const showEditor = ref(false)
 const loading = ref(false)
 const message = ref('')
 const error = ref('')
+const exportingTaskId = ref<number | string | null>(null)
 const form = ref({ name: '', templateId: '', templateVersionId: '', frequency: 'MONTHLY', periodLabel: '', startAt: '', deadline: '', allowLate: false, status: 'DRAFT', description: '', assigneeIds: [] as Array<number | string>, departmentIds: [] as Array<number | string> })
 const frequencyNames: Record<string, string> = { DAILY: '每日', WEEKLY: '每周', MONTHLY: '每月', QUARTERLY: '每季度', YEARLY: '每年', CUSTOM: '自定义' }
 const statusNames: Record<string, string> = { DRAFT: '草稿', PUBLISHED: '已发布', CLOSED: '已关闭' }
@@ -66,6 +68,17 @@ async function remove(task: ReportTask) {
   try { await deleteTask(task.id); message.value = '任务已删除'; await load() } catch (caught) { error.value = msg(caught) }
 }
 function progress(task: ReportTask) { const item = task.progress; return !item?.assigneeCount ? '无有效填报对象' : `${item.submittedAssigneeCount} 已提交 / ${item.pendingAssigneeCount} 待填报` }
+function detailProgress(task: ReportTask) {
+  const item = task.detailProgress
+  if (!item || !item.totalRows) return '尚无明细'
+  return `${item.totalRows} 行（草稿 ${item.draftRows}，已提交 ${item.submittedRows}，退回 ${item.returnedRows}，已通过 ${item.approvedRows}）`
+}
+async function exportTask(task: ReportTask) {
+  if (exportingTaskId.value !== null) return
+  exportingTaskId.value = task.id
+  error.value = ''
+  try { await exportReports(task.templateId, task.id) } catch (caught) { error.value = msg(caught) } finally { exportingTaskId.value = null }
+}
 function scopeLabel(task: ReportTask) {
   const departments = (task.departmentIds || []).map((id) => targets.value.find((target) => String(target.id) === String(id))?.name || `部门#${id}`)
   const assignees = task.assignees?.map((user) => user.username) || []
@@ -93,9 +106,9 @@ onMounted(async () => { try { [templates.value, targets.value] = await Promise.a
       <fieldset class="target-tree"><legend>任务范围</legend><p class="hint">至少选择一个部门或人员。选择部门会覆盖该部门及其下级部门中可填报的人员。</p><ul v-if="rootTargets.length" class="tree-list"><li v-for="target in rootTargets" :key="target.id"><TaskTargetTreeNode :target="target" :children-by-parent="targetsByParent" :department-ids="form.departmentIds" :assignee-ids="form.assigneeIds" @toggle-department="toggleDepartment" @toggle-assignee="toggleAssignee" /></li></ul><p v-else class="muted">当前部门范围内没有可指派对象。</p></fieldset>
       <div class="actions"><button class="primary">保存</button><button type="button" class="secondary" @click="cancel">取消</button></div>
     </form>
-    <div class="table-wrap"><table><thead><tr><th>任务名称</th><th>模板版本</th><th>频率/周期</th><th>指派范围</th><th>完成进度</th><th>截止时间</th><th>逾期</th><th>状态</th><th>操作</th></tr></thead><tbody>
-      <tr v-if="loading"><td colspan="9" class="muted">加载中...</td></tr><tr v-else-if="!tasks.length"><td colspan="9" class="muted">暂无任务。</td></tr>
-      <tr v-for="task in tasks" :key="task.id"><td>{{ task.name }}</td><td>{{ task.templateName }} V{{ task.templateVersionNo || '-' }}</td><td>{{ frequencyNames[task.frequency] || task.frequency }}{{ task.periodLabel ? ` / ${task.periodLabel}` : '' }}</td><td>{{ scopeLabel(task) }}</td><td>{{ progress(task) }}</td><td>{{ task.deadline ? task.deadline.replace('T', ' ') : '-' }}</td><td>{{ task.allowLate ? '允许' : '不允许' }}</td><td>{{ statusNames[task.status] || task.status }}</td><td><button class="text-button" @click="openEdit(task)">修改</button><button class="danger-button" @click="remove(task)">删除</button></td></tr>
+    <div class="table-wrap"><table><thead><tr><th>任务名称</th><th>模板版本</th><th>频率/周期</th><th>指派范围</th><th>人员进度</th><th>明细进度</th><th>截止时间</th><th>逾期</th><th>状态</th><th>操作</th></tr></thead><tbody>
+      <tr v-if="loading"><td colspan="10" class="muted">加载中...</td></tr><tr v-else-if="!tasks.length"><td colspan="10" class="muted">暂无任务。</td></tr>
+      <tr v-for="task in tasks" :key="task.id"><td>{{ task.name }}</td><td>{{ task.templateName }} V{{ task.templateVersionNo || '-' }}</td><td>{{ frequencyNames[task.frequency] || task.frequency }}{{ task.periodLabel ? ` / ${task.periodLabel}` : '' }}</td><td>{{ scopeLabel(task) }}</td><td>{{ progress(task) }}</td><td>{{ detailProgress(task) }}</td><td>{{ task.deadline ? task.deadline.replace('T', ' ') : '-' }}</td><td>{{ task.allowLate ? '允许' : '不允许' }}</td><td>{{ statusNames[task.status] || task.status }}</td><td><button class="text-button" :disabled="exportingTaskId !== null" @click="exportTask(task)">{{ exportingTaskId === task.id ? '导出中...' : '导出 Excel' }}</button><span v-if="task.sourceType === 'SCHEDULED'" class="muted">定时发布，只读</span><template v-else><button class="text-button" @click="openEdit(task)">修改</button><button class="danger-button" @click="remove(task)">删除</button></template></td></tr>
     </tbody></table></div>
   </section>
 </template>

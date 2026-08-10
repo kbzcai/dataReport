@@ -85,8 +85,42 @@ export interface ReportTask {
   allowLate?: boolean
   status: string
   description?: string
+  sourceType?: 'MANUAL' | 'SCHEDULED' | string
+  scheduleId?: number | string
   assigneeIds?: Array<number | string>
   departmentIds?: Array<number | string>
   assignees?: Array<{ id: number | string; username: string; roles: string[] }>
   progress?: { assigneeCount: number; submittedAssigneeCount: number; pendingAssigneeCount: number }
+  detailProgress?: {
+    scope: 'SELF' | 'TASK' | string
+    totalRows: number
+    draftRows: number
+    submittedRows: number
+    returnedRows: number
+    approvedRows: number
+    lastUpdatedAt?: string
+  }
+}
+
+export interface TaskSchedule {
+  id: number | string
+  name: string
+  templateId: number | string
+  templateName?: string
+  templateVersionId: number | string
+  templateVersionNo?: number
+  frequency: 'WEEKLY' | 'MONTHLY' | 'YEARLY' | string
+  weekDay?: number | null
+  dayOfMonth?: number | null
+  monthOfYear?: number | null
+  publishTime: string
+  deadlineDays: number
+  allowLate: boolean
+  status: 'ACTIVE' | 'PAUSED' | string
+  startAt?: string
+  endAt?: string
+  nextRunAt?: string
+  description?: string
+  assigneeIds?: Array<number | string>
+  departmentIds?: Array<number | string>
 }

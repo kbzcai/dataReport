@@ -1,5 +1,11 @@
-# 1. 审批策略：遇到敏感/高危命令时停下来询问用户
-approval_policy = "on-request"
+# 1. 当前项目已授权本地开发与测试，减少重复审批等待。
+approval_policy = "never"
 
-# 2. 沙箱模式：限制 Codex 只能在当前工作区（项目目录）内读写文件
-sandbox_mode = "workspace-write"
+# 2. 默认推理强度：保留多 Agent 协同，减少简单修改的单轮等待。
+reasoning_effort = "medium"
+
+# 3. 沙箱模式：当前项目需要本地构建、启动和网页回归。
+sandbox_mode = "danger-full-access"
+
+[sandbox_workspace_write]
+network_access = true

@@ -11,6 +11,7 @@ frontend_module: frontend
 frontend_language: typescript
 frontend_state: pinia
 frontend_router: vue-router
+frontend_ui: naive-ui
 database: mysql
 test_command: mvn test
 ```

@@ -17,6 +17,7 @@ import com.sjtb.reporting.repository.UserRepository;
 import com.sjtb.reporting.repository.DepartmentRepository;
 import java.time.LocalDateTime;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service @Transactional
 public class TaskService {
     private static final String DRAFT = "DRAFT"; private static final String PUBLISHED = "PUBLISHED"; private static final String CLOSED = "CLOSED";
+    private static final Set<ReportStatus> DETAIL_PROGRESS_STATUSES = EnumSet.of(ReportStatus.DRAFT, ReportStatus.SUBMITTED, ReportStatus.RETURNED, ReportStatus.APPROVED);
     private final ReportTaskRepository tasks; private final ReportTaskDetailRepository details; private final ReportTemplateRepository templates; private final UserRepository users; private final DepartmentRepository departments; private final ReportRecordRepository records; private final CurrentUserService current; private final TemplateService templateService; private final AccessControlService access;
     public TaskService(ReportTaskRepository tasks, ReportTaskDetailRepository details, ReportTemplateRepository templates, UserRepository users, DepartmentRepository departments, ReportRecordRepository records, CurrentUserService current, TemplateService templateService, AccessControlService access) { this.tasks = tasks; this.details = details; this.templates = templates; this.users = users; this.departments = departments; this.records = records; this.current = current; this.templateService = templateService; this.access = access; }
     @Transactional(readOnly = true) public List<TaskDtos.Response> list() {
@@ -37,7 +39,7 @@ public class TaskService {
         List<ReportTask> visible = access.isAdmin(user) ? tasks.findAllByOrderByDeadlineAsc()
                 : access.isLeader(user) ? tasks.findAllByOrderByDeadlineAsc().stream().filter(task -> canManage(task, user, scope)).toList()
                 : tasks.findByAssigneesIdOrderByDeadlineAsc(user.getId());
-        return responses(visible);
+        return responses(visible, user);
     }
     @Transactional(readOnly = true) public List<TaskDtos.AssignableTarget> assignableTargets() {
         User publisher = current.current(); Set<Long> scope = scopeDepartmentIds(publisher);
@@ -58,7 +60,7 @@ public class TaskService {
         Set<Long> scope = access.isLeader(user) && !access.isAdmin(user) ? scopeDepartmentIds(user) : Set.of();
         List<ReportTask> visible = access.isAdmin(user) ? tasks.findAllByOrderByDeadlineAsc()
                 : tasks.findAllByOrderByDeadlineAsc().stream().filter(task -> canManage(task, user, scope)).toList();
-        LocalDateTime now = LocalDateTime.now(); List<TaskDtos.Response> all = responses(visible);
+        LocalDateTime now = LocalDateTime.now(); List<TaskDtos.Response> all = responses(visible, user);
         long published = all.stream().filter(task -> PUBLISHED.equals(task.status())).count();
         long overdue = all.stream().filter(task -> PUBLISHED.equals(task.status()) && task.deadline() != null && task.deadline().isBefore(now)).count();
         long dueSoon = all.stream().filter(task -> PUBLISHED.equals(task.status()) && task.deadline() != null && !task.deadline().isBefore(now) && !task.deadline().isAfter(now.plusDays(3))).count();
@@ -66,9 +68,11 @@ public class TaskService {
         return new TaskDtos.Overview(all.size(), published, dueSoon, overdue, completed, all.stream().mapToLong(task -> task.progress().pendingAssigneeCount()).sum());
     }
     public TaskDtos.Response create(TaskDtos.Request request) { return save(new ReportTask(), request); }
-    public TaskDtos.Response update(Long id, TaskDtos.Request request) { ReportTask task = find(id); assertCanManage(task, current.current()); return save(task, request); }
+    public TaskDtos.Response update(Long id, TaskDtos.Request request) {
+        ReportTask task = find(id); User user = current.current(); assertCanManage(task, user); assertCanModifyScheduledTask(task, user); return save(task, request);
+    }
     public void delete(Long id) {
-        ReportTask task = find(id); assertCanManage(task, current.current());
+        ReportTask task = find(id); User user = current.current(); assertCanManage(task, user); assertCanModifyScheduledTask(task, user);
         if (records.existsByTaskId(id)) throw new ApiException(HttpStatus.CONFLICT, "Task with submitted records cannot be deleted");
         tasks.delete(task);
     }
@@ -96,21 +100,48 @@ public class TaskService {
         if (assignees.isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "Tasks must resolve to at least one enabled REPORTER with REPORT_EDIT permission");
         task.setAssignees(assignees);
         ReportTask saved = tasks.save(task); syncDetails(saved);
-        return responses(List.of(saved)).get(0);
+        return responses(List.of(saved), publisher).get(0);
     }
 
-    private List<TaskDtos.Response> responses(List<ReportTask> source) {
+    @Transactional(readOnly = true)
+    public TaskDtos.DetailProgress detailProgress(Long id) {
+        User user = current.current();
+        ReportTask task = find(id);
+        assertCanView(task, user);
+        return detailProgressByTaskIds(List.of(task.getId()), user).getOrDefault(task.getId(), emptyDetailProgress(user));
+    }
+
+    private List<TaskDtos.Response> responses(List<ReportTask> source, User user) {
         if (source.isEmpty()) return List.of();
-        Map<Long, TaskDtos.ProgressAggregation> progress = records.findTaskProgressByTaskIds(source.stream().map(ReportTask::getId).toList(), Set.of(ReportStatus.SUBMITTED, ReportStatus.APPROVED)).stream().collect(java.util.stream.Collectors.toMap(TaskDtos.ProgressAggregation::taskId, Function.identity()));
-        return source.stream().map(task -> response(task, progress.get(task.getId()))).toList();
+        List<Long> taskIds = source.stream().map(ReportTask::getId).toList();
+        Map<Long, TaskDtos.ProgressAggregation> progress = records.findTaskProgressByTaskIds(taskIds, Set.of(ReportStatus.SUBMITTED, ReportStatus.APPROVED)).stream().collect(java.util.stream.Collectors.toMap(TaskDtos.ProgressAggregation::taskId, Function.identity()));
+        Map<Long, TaskDtos.DetailProgress> detailProgress = detailProgressByTaskIds(taskIds, user);
+        return source.stream().map(task -> response(task, progress.get(task.getId()), detailProgress.getOrDefault(task.getId(), emptyDetailProgress(user)))).toList();
     }
 
-    private TaskDtos.Response response(ReportTask task, TaskDtos.ProgressAggregation aggregation) {
+    private Map<Long, TaskDtos.DetailProgress> detailProgressByTaskIds(List<Long> taskIds, User user) {
+        boolean selfScope = !access.isAdmin(user) && !access.isLeader(user);
+        List<TaskDtos.DetailProgressAggregation> aggregations = selfScope
+                ? records.findTaskDetailProgressByTaskIdsAndReporterId(taskIds, user.getId(), DETAIL_PROGRESS_STATUSES)
+                : records.findTaskDetailProgressByTaskIds(taskIds, DETAIL_PROGRESS_STATUSES);
+        return aggregations.stream().collect(java.util.stream.Collectors.toMap(TaskDtos.DetailProgressAggregation::taskId,
+                aggregation -> detailProgress(aggregation, selfScope ? "SELF" : "TASK")));
+    }
+
+    private TaskDtos.DetailProgress detailProgress(TaskDtos.DetailProgressAggregation aggregation, String scope) {
+        return new TaskDtos.DetailProgress(scope, aggregation.totalRows(), aggregation.draftRows(), aggregation.submittedRows(), aggregation.returnedRows(), aggregation.approvedRows(), aggregation.lastUpdatedAt());
+    }
+
+    private TaskDtos.DetailProgress emptyDetailProgress(User user) {
+        return new TaskDtos.DetailProgress(!access.isAdmin(user) && !access.isLeader(user) ? "SELF" : "TASK", 0, 0, 0, 0, 0, null);
+    }
+
+    private TaskDtos.Response response(ReportTask task, TaskDtos.ProgressAggregation aggregation, TaskDtos.DetailProgress detailProgress) {
         List<TaskDtos.Assignee> assignees = task.getAssignees().stream().sorted(Comparator.comparing(User::getUsername)).map(this::assignee).toList();
         long assigneeCount = assignees.size();
         long submittedCount = aggregation == null ? 0 : aggregation.submittedAssigneeCount();
         ReportTemplateVersion version = task.getTemplateVersion() == null ? templateService.currentVersion(task.getTemplate()) : task.getTemplateVersion();
-        return new TaskDtos.Response(task.getId(), task.getName(), task.getTemplate().getId(), task.getTemplate().getName(), version.getId(), version.getVersionNo(), task.getFrequency(), task.getPeriodLabel(), task.getStartAt(), task.getDeadline(), task.isAllowLate(), task.getStatus(), task.getDescription(), assignees.stream().map(TaskDtos.Assignee::id).toList(), assignees, task.getTargetDepartments().stream().map(Department::getId).toList(), new TaskDtos.Progress(assigneeCount, submittedCount, Math.max(0, assigneeCount - submittedCount)));
+        return new TaskDtos.Response(task.getId(), task.getName(), task.getTemplate().getId(), task.getTemplate().getName(), version.getId(), version.getVersionNo(), task.getFrequency(), task.getPeriodLabel(), task.getStartAt(), task.getDeadline(), task.isAllowLate(), task.getStatus(), task.getDescription(), task.getSourceType(), task.getSchedule() == null ? null : task.getSchedule().getId(), assignees.stream().map(TaskDtos.Assignee::id).toList(), assignees, task.getTargetDepartments().stream().map(Department::getId).toList(), new TaskDtos.Progress(assigneeCount, submittedCount, Math.max(0, assigneeCount - submittedCount)), detailProgress);
     }
 
     private TaskDtos.Assignee assignee(User user) { return new TaskDtos.Assignee(user.getId(), user.getUsername(), user.getRoles().stream().sorted().toList()); }
@@ -174,6 +205,21 @@ public class TaskService {
     }
 
     private void assertCanManage(ReportTask task, User user) { if (!canManage(task, user)) throw new ApiException(HttpStatus.FORBIDDEN, "Task is outside your department scope"); }
+    private void assertCanView(ReportTask task, User user) {
+        if (access.isAdmin(user)) return;
+        if (access.isLeader(user)) {
+            assertCanManage(task, user);
+            return;
+        }
+        boolean assigned = task.getAssignees().stream().anyMatch(assignee -> assignee.getId().equals(user.getId()));
+        if (!assigned) throw new ApiException(HttpStatus.FORBIDDEN, "Task is not assigned to the current reporter");
+    }
+
+    private void assertCanModifyScheduledTask(ReportTask task, User user) {
+        if (task.isScheduled() && !access.isAdmin(user)) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "定时发布的任务仅系统管理员可通过任务管理修改或删除");
+        }
+    }
     public boolean canManage(ReportTask task, User user) {
         return canManage(task, user, scopeDepartmentIds(user));
     }
