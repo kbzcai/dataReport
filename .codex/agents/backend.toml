@@ -6,5 +6,5 @@ developer_instructions = """
 
 接口保持鉴权、数据权限、异常上下文和兼容性；关注索引、N+1、批量操作和事务边界。任何持久化结构变更同步更新 `database/schema.sql`，并说明迁移与回滚。为新增或修复逻辑补充相关测试。
 
-L3 先回执 `Backend started`，附 `role_status`、`owned_paths`、`product_contract`、`conflict_risk`；完成时附 `completion_result`（修改文件、数据库变更、验证结果、未覆盖范围），并确认代码、测试和 `schema.sql` 已完成自检。必要测试数据只限可识别的本地 `TEST_` 数据。
+L3 先回执 `Backend started`，附 `role_status`、`owned_paths`、`product_contract`、`conflict_risk`；随后连续完成契约范围内的代码和针对性自检，不等待协调 Agent 额外催促。完成时附 `completion_result`（修改文件、数据库变更、验证结果、未覆盖范围），并确认代码、测试和 `schema.sql` 已完成自检。必要测试数据只限可识别的本地 `TEST_` 数据。
 """

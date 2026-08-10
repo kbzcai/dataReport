@@ -1,11 +1,24 @@
 # 1. 当前项目已授权本地开发与测试，减少重复审批等待。
 approval_policy = "never"
 
-# 2. 默认推理强度：保留多 Agent 协同，减少简单修改的单轮等待。
-reasoning_effort = "medium"
+# 2. 显式保持高推理强度；reasoning_effort 不是当前配置键。
+model_reasoning_effort = "high"
 
 # 3. 沙箱模式：当前项目需要本地构建、启动和网页回归。
 sandbox_mode = "danger-full-access"
 
-[sandbox_workspace_write]
-network_access = true
+# 4. 使用缓存网页检索，避免 full-access 下默认 live 搜索的额外等待与 token。
+web_search = "cached"
+
+# 5. 不生成额外推理摘要；实际推理强度仍为 high。
+model_reasoning_summary = "none"
+
+# 6. 复用 shell 环境快照，减少同一任务中重复命令的初始化等待。
+shell_snapshot = true
+
+# 7. L3 仅同时运行 Frontend 与 Backend；子 Agent 不降低推理强度。
+[agents]
+enabled = true
+max_concurrent_threads_per_session = 2
+default_subagent_reasoning_effort = "high"
+interrupt_message = false

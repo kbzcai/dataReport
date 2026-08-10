@@ -48,6 +48,7 @@ L1 的 Product 轻量判定卡最多包含：范围、影响矩阵、实施角�
 7. 可观测性要求：子 Agent 调度工具成功返回 Agent 标识，即构成“已调度”证据；协调 Agent 在派发后的下一次自然过程更新中列出角色、Agent 标识、任务边界和已知状态。当前窗口自动展示“已开始工作”或 `running`、Agent 正常产生的过程更新、文件改动或“已完成”结果，任一项均构成“已开始工作”的证据；不得仅为确认状态额外安排探针、轮询或延迟实施。同一并行组在同一调度阶段被实际创建且未等待任一方结果，即构成“已并行派发”；只有运行时界面或调度工具自然显示两个 Agent 同时处于“已开始工作”或 `running` 时，才可额外记录为“正在并行执行”。没有瞬时状态只说明“已并行派发，未额外采集瞬时运行状态”，不得据此否认已调度，也不得虚报同时运行。`pending_init`、未返回标识、工具不可用或并发槽不足不构成已调度，必须说明原因并等待可用槽位或请求用户调整，不能自行改写为单 Agent 实施。
 8. L3 并行执行模板：Product 完成后，协调 Agent 先确认 Frontend 与 Backend 的写入目录互斥（通常为 `frontend/` 与 `backend/`、`database/`），再同阶段创建两个实现 Agent；等待两个 Agent 都结束后创建 Tester。协调 Agent 不得替代被派发的实现 Agent 修改其职责目录。若运行时不支持可见多 Agent 状态，本模板不适用于“必须可见并行”的用户要求，应在开始实现前明确报告该能力缺失。
 9. 用户已明确要求启动服务、测试或完成完整流程时，该命令同时构成该次运行验证的授权。协调 Agent 不得因内部调度、Agent 卡片或流程门禁失败而结束任务或要求用户重复授权；必须自行重试调度、使用可用执行路径继续完成剩余步骤。只有外部依赖、权限或环境故障确实使工作无法继续时，才立即报告具体错误、已完成工作、影响和需要用户决定的最小事项。
+10. 自动续跑与状态：协调 Agent 在任一子 Agent 完成后必须立即执行下一依赖步骤，直到 Tester 完成并在主页面交付；不得以“将要派发”“正在等待”结束当前回复。每次派发、脚本、构建或测试完成后，必须在同一主线程更新实际结果、下一步和阻塞原因；没有真实命令结果不得标记为完成。
 
 ## 版本控制快速通道
 
@@ -108,11 +109,12 @@ Product 必须在影响矩阵中声明 `runtime_behavior_changed`、`restart_fro
 ## Agent 生命周期
 
 - 实施 Agent 按任务创建，完成职责、提交完成回执后结束；不得保持空闲运行、持续轮询或作为下一次任务的常驻执行者。
-- 当前任务界面保留的“已完成”卡片是审计记录，不表示 Agent 仍在消耗资源。下一次功能修改必须重新经过 Product 判定后，按影响范围创建新的实施 Agent；不得复用旧任务代替新派发。
+- 当前任务界面保留的“已完成”卡片是审计记录，不表示 Agent 仍在消耗资源。下一次功能修改必须重新经过 Product 判定后，按影响范围创建新的实施 Agent；不得复用旧任务代替新派发。出现 `pending_init`、`unknown conversation` 或 `Conversation state not found` 时，当前轮不得再占用该卡片；记录证据后由协调 Agent 继续使用契约文件和可用槽位，下一轮前重启桌面端释放客户端会话映射。
 
 ## 按影响范围验证
 
 - 小型、局部且不涉及接口契约、数据库、构建配置或共享核心逻辑的修改，只运行针对性检查；其余变更执行相关构建/测试。服务仅在用户确认后启动；启动失败或未启动时，不得宣称运行验证完成，并说明未覆盖范围。最终交付说明参与角色、修改内容、验证结果和剩余风险。
+- 实施角色只运行本职责范围内的针对性自检，并记录命令和结果。Tester 优先复用这些证据；除证据缺失、失败或与改动范围不匹配外，不重复运行同一 Maven/npm 构建或测试。
 
 ## 模板字段变更与数据处理
 
@@ -126,7 +128,7 @@ Product 必须在影响矩阵中声明 `runtime_behavior_changed`、`restart_fro
 - `.codex/config.toml`
 - `.codex/agents/*.toml`
 
-仅维护本仓库内 `multi-agent-project-template` 模板副本时，可运行 `multi-agent-project-template/sync-from-project.ps1` 执行默认同步。目标项目只复制 `AGENTS.md`、`.codex` 和 `PROJECT_PROFILE.md` 时不包含该脚本，必须忽略本节同步命令。`.codex/config.toml` 默认不同步；仅在明确执行 `-IncludeConfig`，并确认源文件不含本地网络、模型、代理、凭据或其他环境项时才可同步。不得同步 `TEST_ACCOUNTS.md`、`.env`、本地数据库配置、`PROJECT_PROFILE.md` 或其他包含凭据的 Markdown/TOML 文件。
+仅维护本仓库内 `multi-agent-project-template` 模板副本时，可运行 `multi-agent-project-template/sync-from-project.ps1` 直接同步 `AGENTS.md`、`.codex/config.toml` 与五个角色 TOML。用户已确认模板默认采用 `approval_policy = "never"` 与 `sandbox_mode = "danger-full-access"`；`.codex/config.toml` 仍不得包含模型、提供方、代理、Token、凭据、测试账号、数据库连接或生产地址。不得同步 `TEST_ACCOUNTS.md`、`.env`、本地数据库配置、`PROJECT_PROFILE.md` 或其他包含凭据的 Markdown/TOML 文件。
 
 ## 项目技术档案与模板同步
 
