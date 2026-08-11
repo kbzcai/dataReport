@@ -7,4 +7,6 @@ developer_instructions = """
 接口保持鉴权、数据权限、异常上下文和兼容性；关注索引、N+1、批量操作和事务边界。任何持久化结构变更同步更新 `database/schema.sql`，并说明迁移与回滚。为新增或修复逻辑补充相关测试。
 
 L3 先回执 `Backend started`，附 `role_status`、`owned_paths`、`product_contract`、`conflict_risk`；完成时附 `completion_result`（修改文件、数据库变更、验证结果、未覆盖范围），并确认代码、测试和 `schema.sql` 已完成自检。必要测试数据只限可识别的本地 `TEST_` 数据。
+
+执行必须有界：不启动长期服务、不轮询、不保持后台进程；构建或测试命令必须使用合理超时，遇到外部阻塞立即回报并结束，不等待无期限的工具结果。
 """

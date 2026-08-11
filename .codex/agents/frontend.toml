@@ -7,4 +7,6 @@ developer_instructions = """
 只修改 `frontend/` 及必要前端配置。复用现有组件、路由、状态与样式；为接口定义类型，处理加载、空数据、错误、权限、表单校验、提交防重和删除确认。发现契约缺失或冲突立即反馈，不猜测后端行为；保持 UTF-8。
 
 L3 先回执 `Frontend started`，附 `role_status`、`owned_paths`、`product_contract`、`conflict_risk`；完成时附 `completion_result`（修改文件、接口对接、验证结果、未覆盖范围）。
+
+执行必须有界：不启动长期开发服务器、不轮询、不使用无超时的等待命令；完成代码、针对性验证和回执后立即结束任务。
 """

@@ -10,6 +10,7 @@ import { AddOutline, CloudUploadOutline, DownloadOutline, TrashOutline } from '@
 import { downloadTemplate, listTemplates } from '../api/templates'
 import { confirmImport, createReports, downloadImportErrors, importPreview, importReport, listImportBatches, type ImportBatch, type ImportSheetPreview } from '../api/reports'
 import { listTaskReminders, listTasks, type TaskReminder } from '../api/tasks'
+import { listLateFillRequests, type LateFillRequest } from '../api/lateFill'
 import { useAuthStore } from '../stores/auth'
 import type { ReportTask, Template, TemplateColumn } from '../types'
 import '../styles/report-import.css'
@@ -22,6 +23,7 @@ const auth = useAuthStore()
 const templates = ref<Template[]>([])
 const tasks = ref<ReportTask[]>([])
 const reminders = ref<TaskReminder[]>([])
+const lateFillRequests = ref<LateFillRequest[]>([])
 const importBatches = ref<ImportBatch[]>([])
 const selectedTaskId = ref('')
 const independentTemplateId = ref('')
@@ -48,10 +50,14 @@ const selectedTemplate = computed(() => {
 const templateOptions = computed(() => templates.value.map((template) => ({ label: template.name, value: String(template.id) })))
 const selectedReminder = computed(() => reminders.value.find((item) => String(item.taskId) === selectedTaskId.value))
 const taskIsOverdue = computed(() => selectedReminder.value?.level === 'OVERDUE' || isOverdue(selectedTask.value?.deadline))
-const taskSubmissionBlocked = computed(() => Boolean(selectedTask.value && taskIsOverdue.value && (reporterOnly.value || !selectedTask.value.allowLate)))
+const activeLateFillRequest = computed(() => lateFillRequests.value
+  .filter((item) => String(item.taskId) === selectedTaskId.value && item.status === 'APPROVED' && item.lateDeadline)
+  .sort((left, right) => new Date(right.lateDeadline!).getTime() - new Date(left.lateDeadline!).getTime())[0])
+const hasActiveLateFill = computed(() => Boolean(activeLateFillRequest.value && new Date(activeLateFillRequest.value.lateDeadline!).getTime() > Date.now()))
+const taskSubmissionBlocked = computed(() => Boolean(selectedTask.value && taskIsOverdue.value && (reporterOnly.value ? !hasActiveLateFill.value : !selectedTask.value.allowLate)))
 const taskStatus = computed(() => {
   if (!selectedTask.value) return reporterOnly.value ? '请选择已发布任务' : '自主填报'
-  if (taskIsOverdue.value) return reporterOnly.value || !selectedTask.value.allowLate ? '已逾期，已关闭' : '已逾期，可补报'
+  if (taskIsOverdue.value) return reporterOnly.value ? (hasActiveLateFill.value ? '补报已批准' : '已逾期，待申请') : !selectedTask.value.allowLate ? '已逾期，已关闭' : '已逾期，可补报'
   if (selectedReminder.value?.level === 'DUE_SOON') return '即将截止'
   return '待填报'
 })
@@ -274,6 +280,9 @@ async function load() {
     if (typeof queryTaskId === 'string' && publishedTasks.value.some((task) => String(task.id) === queryTaskId)) selectedTaskId.value = queryTaskId
   } catch (caught) { error.value = msg(caught) }
   try { reminders.value = await listTaskReminders() } catch { reminders.value = [] }
+  if (reporterOnly.value) {
+    try { lateFillRequests.value = await listLateFillRequests() } catch { lateFillRequests.value = [] }
+  }
 }
 watch(selectedTemplate, resetManualRows)
 watch(() => route.query.taskId, (taskId) => {
@@ -304,8 +313,10 @@ onMounted(load)
 
     <n-alert v-if="message" type="success" closable class="workbench-notice" @close="message = ''">{{ message }}</n-alert>
     <n-alert v-if="error" type="error" closable class="workbench-notice" @close="error = ''">{{ error }}</n-alert>
-    <n-alert v-if="selectedTask && taskIsOverdue" :type="reporterOnly || !selectedTask.allowLate ? 'error' : 'warning'" class="workbench-notice" :show-icon="true">
-      {{ reporterOnly || !selectedTask.allowLate ? '当前任务已逾期，在线填报和 Excel 导入已禁用。' : '当前任务已逾期，仍允许补报，请尽快提交。' }}
+    <n-alert v-if="selectedTask && taskIsOverdue" :type="taskSubmissionBlocked ? 'error' : 'warning'" class="workbench-notice" :show-icon="true">
+      <span>{{ taskSubmissionBlocked ? (reporterOnly ? '当前任务已逾期，请先提交补报申请并等待指定领导批准。' : '当前任务已逾期，在线填报和 Excel 导入已禁用。') : '补报已批准，请在批准截止时间前完成提交。' }}</span>
+      <n-button v-if="reporterOnly && taskSubmissionBlocked" text type="primary" @click="$router.push({ path: '/late-fill-requests', query: { taskId: selectedTaskId } })">申请补报</n-button>
+      <span v-if="reporterOnly && hasActiveLateFill">批准截止：{{ date(activeLateFillRequest?.lateDeadline) }}</span>
     </n-alert>
     <n-alert v-else-if="selectedTask && selectedReminder?.level === 'DUE_SOON'" type="warning" class="workbench-notice" :show-icon="true">该任务即将截止，请及时完成填报。</n-alert>
 
@@ -317,7 +328,7 @@ onMounted(load)
           <span class="task-card-template">{{ task.templateName || '关联模板' }}{{ task.periodLabel ? ` · ${task.periodLabel}` : '' }}</span>
           <span class="task-card-meta">截止：{{ date(task.deadline) }}</span>
           <span class="task-card-progress">{{ detailProgressLabel(task) }}</span>
-          <n-tag size="small" :type="deadlineTone(task)" :bordered="false">{{ isOverdue(task.deadline) ? (reporterOnly || !task.allowLate ? '已逾期' : '已逾期，可补报') : reminders.find((item) => String(item.taskId) === String(task.id))?.level === 'DUE_SOON' ? '即将截止' : '待填报' }}</n-tag>
+          <n-tag size="small" :type="deadlineTone(task)" :bordered="false">{{ isOverdue(task.deadline) ? (reporterOnly ? (String(task.id) === selectedTaskId && hasActiveLateFill ? '补报已批准' : '已逾期') : !task.allowLate ? '已逾期' : '已逾期，可补报') : reminders.find((item) => String(item.taskId) === String(task.id))?.level === 'DUE_SOON' ? '即将截止' : '待填报' }}</n-tag>
         </button>
       </div>
       <n-empty v-else description="当前没有已发布的填报任务" size="small" />

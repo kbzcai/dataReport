@@ -29,8 +29,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 @Service @Transactional
 public class ReportService {
-    private final ReportRecordRepository records; private final ReportRecordValueRepository values; private final ReportChangeRequestRepository changeRequests; private final TemplateService templates; private final TaskService tasks; private final ReportAuditService audit; private final CurrentUserService currentUsers; private final ObjectMapper mapper; private final AccessControlService access;
-    public ReportService(ReportRecordRepository records, ReportRecordValueRepository values, ReportChangeRequestRepository changeRequests, TemplateService templates, TaskService tasks, ReportAuditService audit, CurrentUserService currentUsers, ObjectMapper mapper, AccessControlService access) { this.records = records; this.values = values; this.changeRequests = changeRequests; this.templates = templates; this.tasks = tasks; this.audit = audit; this.currentUsers = currentUsers; this.mapper = mapper; this.access = access; }
+    private final ReportRecordRepository records; private final ReportRecordValueRepository values; private final ReportChangeRequestRepository changeRequests; private final TemplateService templates; private final TaskService tasks; private final ReportAuditService audit; private final CurrentUserService currentUsers; private final ObjectMapper mapper; private final AccessControlService access; private final LateFillRequestService lateFillRequests;
+    public ReportService(ReportRecordRepository records, ReportRecordValueRepository values, ReportChangeRequestRepository changeRequests, TemplateService templates, TaskService tasks, ReportAuditService audit, CurrentUserService currentUsers, ObjectMapper mapper, AccessControlService access, LateFillRequestService lateFillRequests) { this.records = records; this.values = values; this.changeRequests = changeRequests; this.templates = templates; this.tasks = tasks; this.audit = audit; this.currentUsers = currentUsers; this.mapper = mapper; this.access = access; this.lateFillRequests = lateFillRequests; }
     @Transactional(readOnly = true) public List<ReportDtos.Response> list(Long templateId) {
         User user = currentUsers.current(); access.requireView(user); java.util.Set<Long> scope = access.scopeDepartmentIds(user);
         List<ReportRecord> source = templateId == null ? records.findAll() : records.findByTemplateIdOrderByUpdatedAtDesc(templateId);
@@ -89,13 +89,13 @@ public class ReportService {
     }
     public ReportDtos.Response review(Long id, ReportDtos.ReviewRequest request) {
         ReportRecord entity = find(id); User user = currentUsers.current();
-        if (!(access.isAdmin(user) || (access.isLeader(user) && access.canManageDepartment(user, entity.getReporter().getDepartment()))) || !access.hasEdit(user)) throw new ApiException(HttpStatus.FORBIDDEN, "Only a scoped leader with REPORT_EDIT may review this record");
+        if (!access.isAdmin(user) || !access.hasEdit(user)) throw new ApiException(HttpStatus.FORBIDDEN, "Only a system administrator with REPORT_EDIT may review this record");
         entity.setStatus(request.status()); entity.setReviewComment(request.reviewComment()); audit.record(entity, "REVIEW", entity.getDataJson(), entity.getDataJson(), request.reviewComment()); return toResponse(entity);
     }
     public void delete(Long id) { ReportRecord entity = find(id); User user = currentUsers.current(); boolean manager = access.isAdmin(user) || (access.isLeader(user) && access.canManageDepartment(user, entity.getReporter().getDepartment())); if (!access.canEditRecord(user, entity)) throw new ApiException(HttpStatus.FORBIDDEN, "You cannot delete this record"); if (!manager && entity.getStatus() != ReportStatus.DRAFT) throw new ApiException(HttpStatus.BAD_REQUEST, "Submitted reports must be changed through a change request"); audit.record(entity, "DELETE", entity.getDataJson(), null, null); if (changeRequests.existsByReportId(id)) changeRequests.deleteByReportId(id); records.delete(entity); }
     private ReportRecord find(Long id) { return records.findById(id).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Report record not found")); }
     private void assertCanRead(ReportRecord entity) { User user = currentUsers.current(); if (!access.canReadRecord(user, entity)) throw new ApiException(HttpStatus.FORBIDDEN, "You cannot view this record"); }
-    private void assertCanFill(User user) { access.requireEdit(user); if (!access.isAdmin(user) && !access.isLeader(user) && !user.getRoles().contains(Role.REPORTER)) throw new ApiException(HttpStatus.FORBIDDEN, "Your role cannot submit report data"); }
+    private void assertCanFill(User user) { access.requireEdit(user); if (!access.isAdmin(user) && !user.getRoles().contains(Role.REPORTER)) throw new ApiException(HttpStatus.FORBIDDEN, "Only reporters or administrators may submit report data"); }
     private void validateReporterStatus(User user, ReportStatus status) { if (!user.getRoles().contains(Role.ADMIN) && !user.getRoles().contains(Role.LEADER) && status != ReportStatus.DRAFT && status != ReportStatus.SUBMITTED) throw new ApiException(HttpStatus.FORBIDDEN, "Only a leader or administrator may set this report status"); }
     void validateTask(ReportTask task, ReportTemplate template, User user) {
         validateTask(task, template, user, false);
@@ -111,7 +111,8 @@ public class ReportService {
         if (!"PUBLISHED".equals(task.getStatus())) throw new ApiException(HttpStatus.BAD_REQUEST, "This task is not published");
         LocalDateTime now = LocalDateTime.now();
         if (task.getStartAt() != null && now.isBefore(task.getStartAt())) throw new ApiException(HttpStatus.BAD_REQUEST, "This task has not started");
-        if (task.getDeadline() != null && now.isAfter(task.getDeadline()) && (reporter || !task.isAllowLate())) throw new ApiException(HttpStatus.BAD_REQUEST, "This task is past its deadline");
+        if (task.getDeadline() != null && now.isAfter(task.getDeadline()) && reporter && !lateFillRequests.hasActiveWindow(task.getId(), user.getId())) throw new ApiException(HttpStatus.BAD_REQUEST, "This task is past its deadline; request and obtain late-fill approval first");
+        if (task.getDeadline() != null && now.isAfter(task.getDeadline()) && !reporter && !task.isAllowLate()) throw new ApiException(HttpStatus.BAD_REQUEST, "This task is past its deadline");
         if (task.getAssignees() == null || task.getAssignees().isEmpty()) throw new ApiException(HttpStatus.BAD_REQUEST, "Published tasks must have at least one assignee");
         if (task.getAssignees().stream().noneMatch(item -> item.getId().equals(user.getId()))) throw new ApiException(HttpStatus.FORBIDDEN, "You are not assigned to this task");
     }

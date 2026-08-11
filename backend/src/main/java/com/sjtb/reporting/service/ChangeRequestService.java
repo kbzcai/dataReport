@@ -44,7 +44,7 @@ public class ChangeRequestService {
     }
     private ChangeRequestDtos.Response review(Long id, ChangeRequestDtos.ReviewRequest input, ChangeRequestStatus target) {
         User reviewer = current.current(); access.requireEdit(reviewer);
-        ReportChangeRequest entity = find(id); if (!(access.isAdmin(reviewer) || (access.isLeader(reviewer) && access.canManageDepartment(reviewer, entity.getReport().getReporter().getDepartment())))) throw new ApiException(HttpStatus.FORBIDDEN, "Only a scoped leader may review requests"); if (entity.getStatus() != ChangeRequestStatus.PENDING) throw new ApiException(HttpStatus.BAD_REQUEST, "Only pending requests can be reviewed");
+        ReportChangeRequest entity = find(id); if (!access.isAdmin(reviewer)) throw new ApiException(HttpStatus.FORBIDDEN, "Only a system administrator may review data change requests"); if (entity.getStatus() != ChangeRequestStatus.PENDING) throw new ApiException(HttpStatus.BAD_REQUEST, "Only pending requests can be reviewed");
         if (target == ChangeRequestStatus.APPROVED) {
             ReportRecord report = lockedReport(entity.getReport().getId());
             if (!sameVersion(report.getUpdatedAt(), entity.getBaseUpdatedAt())) throw new ApiException(HttpStatus.CONFLICT, "The original record changed after this request was submitted");

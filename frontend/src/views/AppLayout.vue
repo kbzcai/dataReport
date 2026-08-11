@@ -14,9 +14,10 @@ const menus = computed(() => [
   ...(hasAnyRole('ADMIN', 'LEADER') ? [{ to: '/tasks', label: '填报任务', icon: 'K' }] : []),
   ...(hasAnyRole('MAINTAINER', 'ADMIN') ? [{ to: '/templates', label: '模板维护', icon: 'T' }] : []),
   ...(hasAnyRole('MAINTAINER', 'ADMIN') ? [{ to: '/task-schedules', label: '定时发布', icon: 'S' }] : []),
-  ...(hasAnyRole('REPORTER', 'ADMIN', 'LEADER') && auth.hasPermission('REPORT_EDIT') ? [{ to: '/reports/import', label: '数据填报', icon: 'F' }] : []),
+  ...(hasAnyRole('REPORTER', 'ADMIN') && auth.hasPermission('REPORT_EDIT') ? [{ to: '/reports/import', label: '数据填报', icon: 'F' }] : []),
   ...(hasAnyRole('REPORTER') ? [{ to: '/my-reports', label: '我的填报', icon: 'M' }, { to: '/reminders', label: '填报提醒', icon: 'R' }] : []),
-  ...(hasAnyRole('LEADER', 'ADMIN') ? [{ to: '/reports', label: '填报数据', icon: 'D' }, { to: '/approvals', label: '修改审批', icon: 'A' }, { to: '/analytics', label: '数据看板', icon: 'C' }] : []),
+  ...(hasAnyRole('REPORTER', 'LEADER', 'ADMIN') ? [{ to: '/late-fill-requests', label: '补报申请', icon: 'L' }] : []),
+  ...(hasAnyRole('LEADER', 'ADMIN') ? [{ to: '/reports', label: '填报数据', icon: 'D' }, ...(hasAnyRole('ADMIN') ? [{ to: '/approvals', label: '修改审批', icon: 'A' }] : []), { to: '/analytics', label: '数据看板', icon: 'C' }] : []),
 ])
 const roleName = computed(() => auth.roles.map((role) => ({ ADMIN: '系统管理员', MAINTAINER: '模板管理员', LEADER: '数据领导', REPORTER: '填报人员' }[role] || role)).join('、'))
 
@@ -26,7 +27,7 @@ function formatDeadline(value?: string) {
 
 function goToOverdueTask(taskId: number | string) {
   showOverdueReminders.value = false
-  router.push({ path: '/reports/import', query: { taskId: String(taskId) } })
+  router.push({ path: '/late-fill-requests', query: { taskId: String(taskId) } })
 }
 
 async function loadOverdueReminders() {
@@ -65,15 +66,15 @@ onMounted(loadOverdueReminders)
       <section class="detail-modal overdue-reminder-modal" role="dialog" aria-modal="true" aria-labelledby="overdue-reminder-title">
         <header class="detail-modal-header">
           <div>
-            <h2 id="overdue-reminder-title">填报任务已逾期</h2>
-            <p>以下任务已超过截止时间，请尽快完成填报。</p>
+          <h2 id="overdue-reminder-title">填报任务已逾期</h2>
+            <p>以下任务已超过截止时间，可申请指定领导批准补报。</p>
           </div>
           <button class="text-button" @click="showOverdueReminders = false">关闭</button>
         </header>
         <div class="detail-table-scroll">
           <table>
             <thead><tr><th>任务</th><th>模板</th><th>周期</th><th>截止时间</th><th>操作</th></tr></thead>
-            <tbody><tr v-for="item in overdueReminders" :key="item.taskId"><td>{{ item.taskName }}</td><td>{{ item.templateName }}</td><td>{{ item.periodLabel || '-' }}</td><td>{{ formatDeadline(item.deadline) }}</td><td><button class="text-button" @click="goToOverdueTask(item.taskId)">立即填报</button></td></tr></tbody>
+            <tbody><tr v-for="item in overdueReminders" :key="item.taskId"><td>{{ item.taskName }}</td><td>{{ item.templateName }}</td><td>{{ item.periodLabel || '-' }}</td><td>{{ formatDeadline(item.deadline) }}</td><td><button class="text-button" @click="goToOverdueTask(item.taskId)">申请补报</button></td></tr></tbody>
           </table>
         </div>
         <footer class="detail-pagination"><button class="secondary" @click="showOverdueReminders = false">稍后处理</button></footer>

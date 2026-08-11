@@ -11,6 +11,7 @@ import ApprovalView from '../views/ApprovalView.vue'
 import ReminderView from '../views/ReminderView.vue'
 import AnalyticsView from '../views/AnalyticsView.vue'
 import TaskScheduleView from '../views/TaskScheduleView.vue'
+import LateFillRequestView from '../views/LateFillRequestView.vue'
 import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
@@ -26,10 +27,11 @@ const router = createRouter({
         { path: 'tasks', component: TaskView, meta: { roles: ['LEADER', 'ADMIN'] } },
         { path: 'my-reports', component: MyReportsView, meta: { roles: ['REPORTER'] } },
         { path: 'reminders', component: ReminderView, meta: { roles: ['REPORTER'] } },
-        { path: 'approvals', component: ApprovalView, meta: { roles: ['LEADER', 'ADMIN'] } },
+        { path: 'late-fill-requests', component: LateFillRequestView, meta: { roles: ['REPORTER', 'LEADER', 'ADMIN'] } },
+        { path: 'approvals', component: ApprovalView, meta: { roles: ['ADMIN'] } },
         { path: 'analytics', component: AnalyticsView, meta: { roles: ['LEADER', 'ADMIN'] } },
         { path: 'departments', component: () => import('../views/DepartmentManageView.vue'), meta: { roles: ['ADMIN'] } },
-        { path: 'reports/import', component: ReportImportView, meta: { roles: ['REPORTER', 'LEADER', 'ADMIN'], permissions: ['REPORT_EDIT'] } },
+        { path: 'reports/import', component: ReportImportView, meta: { roles: ['REPORTER', 'ADMIN'], permissions: ['REPORT_EDIT'] } },
         { path: 'reports', component: ReportManageView, meta: { roles: ['LEADER', 'ADMIN'] } },
       ],
     },

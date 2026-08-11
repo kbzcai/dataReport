@@ -1,0 +1,28 @@
+package com.sjtb.reporting.service;
+import com.sjtb.reporting.domain.*;
+import com.sjtb.reporting.dto.LateFillDtos;
+import com.sjtb.reporting.exception.ApiException;
+import com.sjtb.reporting.repository.*;
+import java.time.LocalDateTime;
+import java.util.*;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+@Service @Transactional
+public class LateFillRequestService {
+ private final ReportLateFillRequestRepository requests; private final ReportTaskRepository tasks; private final UserRepository users; private final CurrentUserService current; private final AccessControlService access;
+ public LateFillRequestService(ReportLateFillRequestRepository r,ReportTaskRepository t,UserRepository u,CurrentUserService c,AccessControlService a){requests=r;tasks=t;users=u;current=c;access=a;}
+ public LateFillDtos.Response create(LateFillDtos.Create input){ User user=current.current(); requireReporter(user); ReportTask task=findTask(input.taskId()); validateOverdueTask(task,user); User leader=leader(input.leaderId()); if(!access.canManageDepartment(leader,user.getDepartment())) throw new ApiException(HttpStatus.BAD_REQUEST,"Selected leader cannot manage your department"); if(requests.existsByTaskIdAndRequesterIdAndStatus(task.getId(),user.getId(),LateFillRequestStatus.PENDING)) throw new ApiException(HttpStatus.CONFLICT,"A late-fill request is already pending"); ReportLateFillRequest item=new ReportLateFillRequest();item.setTask(task);item.setRequester(user);item.setLeader(leader);item.setReason(input.reason().trim());return response(requests.save(item)); }
+ @Transactional(readOnly=true) public List<LateFillDtos.Response> list(){User user=current.current(); if(access.isAdmin(user)) return requests.findAll().stream().map(this::response).toList(); if(access.isLeader(user)) return requests.findByLeaderIdOrderByCreatedAtDesc(user.getId()).stream().map(this::response).toList(); return requests.findByRequesterIdOrderByCreatedAtDesc(user.getId()).stream().map(this::response).toList();}
+ @Transactional(readOnly=true) public List<LateFillDtos.Leader> leaders(Long taskId){User user=current.current(); requireReporter(user);validateTaskAssigned(findTask(taskId),user);return users.findEnabledUsersWithAnyRole(List.of(Role.LEADER)).stream().filter(x->access.canManageDepartment(x,user.getDepartment())).map(x->new LateFillDtos.Leader(x.getId(),x.getUsername())).toList();}
+ public LateFillDtos.Response approve(Long id,LateFillDtos.Review input){ReportLateFillRequest item=find(id);User reviewer=current.current();if(!access.isAdmin(reviewer)&&!reviewer.getId().equals(item.getLeader().getId()))throw new ApiException(HttpStatus.FORBIDDEN,"Only the selected leader may approve this late-fill request");if(item.getStatus()!=LateFillRequestStatus.PENDING)throw new ApiException(HttpStatus.BAD_REQUEST,"Only pending requests can be approved");item.setStatus(LateFillRequestStatus.APPROVED);item.setLateDeadline(input.lateDeadline());item.setReviewComment(input.reviewComment());item.setReviewedAt(LocalDateTime.now());return response(item);}
+ public LateFillDtos.Response reject(Long id,String comment){ReportLateFillRequest item=find(id);User reviewer=current.current();if(!access.isAdmin(reviewer)&&!reviewer.getId().equals(item.getLeader().getId()))throw new ApiException(HttpStatus.FORBIDDEN,"Only the selected leader may reject this late-fill request");if(item.getStatus()!=LateFillRequestStatus.PENDING)throw new ApiException(HttpStatus.BAD_REQUEST,"Only pending requests can be rejected");item.setStatus(LateFillRequestStatus.REJECTED);item.setReviewComment(comment);item.setReviewedAt(LocalDateTime.now());return response(item);}
+ public boolean hasActiveWindow(Long taskId,Long userId){return requests.findFirstByTaskIdAndRequesterIdAndStatusAndLateDeadlineAfterOrderByLateDeadlineDesc(taskId,userId,LateFillRequestStatus.APPROVED,LocalDateTime.now()).isPresent();}
+ private void requireReporter(User u){if(!u.getRoles().contains(Role.REPORTER)||access.isAdmin(u)||access.isLeader(u))throw new ApiException(HttpStatus.FORBIDDEN,"Only a reporter may request late filling");}
+ private ReportTask findTask(Long id){return tasks.findById(id).orElseThrow(()->new ApiException(HttpStatus.NOT_FOUND,"Report task not found"));}
+ private User leader(Long id){User u=users.findById(id).orElseThrow(()->new ApiException(HttpStatus.NOT_FOUND,"Leader not found"));if(!u.isEnabled()||!u.getRoles().contains(Role.LEADER))throw new ApiException(HttpStatus.BAD_REQUEST,"Selected user is not an active leader");return u;}
+ private void validateOverdueTask(ReportTask t,User u){validateTaskAssigned(t,u);if(t.getDeadline()==null||!LocalDateTime.now().isAfter(t.getDeadline()))throw new ApiException(HttpStatus.BAD_REQUEST,"Late fill can only be requested after the task deadline");}
+ private void validateTaskAssigned(ReportTask t,User u){if(!"PUBLISHED".equals(t.getStatus())||t.getAssignees().stream().noneMatch(x->x.getId().equals(u.getId())))throw new ApiException(HttpStatus.FORBIDDEN,"You are not assigned to this published task");}
+ private ReportLateFillRequest find(Long id){return requests.findById(id).orElseThrow(()->new ApiException(HttpStatus.NOT_FOUND,"Late-fill request not found"));}
+ private LateFillDtos.Response response(ReportLateFillRequest x){return new LateFillDtos.Response(x.getId(),x.getTask().getId(),x.getTask().getName(),x.getRequester().getId(),x.getRequester().getUsername(),x.getLeader().getId(),x.getLeader().getUsername(),x.getReason(),x.getStatus(),x.getLateDeadline(),x.getReviewComment(),x.getCreatedAt(),x.getReviewedAt());}
+}

@@ -44,6 +44,20 @@ class AccessControlServiceTest {
         assertThat(access.isEligibleAssignee(viewOnly)).isFalse();
     }
 
+    @Test
+    void leaderCannotEditAReportEvenInsideTheirDepartmentTree() {
+        DepartmentRepository departments = org.mockito.Mockito.mock(DepartmentRepository.class);
+        Department root = department(1L, null);
+        Department child = department(2L, root);
+        when(departments.findAll()).thenReturn(List.of(root, child));
+        AccessControlService access = new AccessControlService(departments);
+
+        User leader = user(10L, Set.of(Role.LEADER), Set.of(Permission.REPORT_VIEW, Permission.REPORT_EDIT), root);
+        User reporter = user(11L, Set.of(Role.REPORTER), Set.of(Permission.REPORT_VIEW, Permission.REPORT_EDIT), child);
+
+        assertThat(access.canEditRecord(leader, record(reporter))).isFalse();
+    }
+
     private static ReportRecord record(User reporter) {
         ReportRecord record = new ReportRecord();
         record.setReporter(reporter);

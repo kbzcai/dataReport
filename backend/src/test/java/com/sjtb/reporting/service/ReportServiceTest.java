@@ -1,9 +1,7 @@
 package com.sjtb.reporting.service;
 
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -40,7 +38,7 @@ class ReportServiceTest {
         reporter.setRoles(Set.of(Role.REPORTER));
 
         ReportService service = new ReportService(
-                null, null, null, null, null, null, null, new ObjectMapper(), new AccessControlService(null));
+                null, null, null, null, null, null, null, new ObjectMapper(), new AccessControlService(null), mock(LateFillRequestService.class));
 
         assertThatThrownBy(() -> service.validateTask(null, template, reporter))
                 .isInstanceOf(ApiException.class)
@@ -52,6 +50,7 @@ class ReportServiceTest {
     void reporterCannotFillPastDeadlineEvenWhenTaskAllowsLateSubmission() {
         ReportTemplate template = template(1L);
         ReportTask task = new ReportTask();
+        ReflectionTestUtils.setField(task, "id", 3L);
         task.setTemplate(template);
         task.setStatus("PUBLISHED");
         task.setDeadline(LocalDateTime.now().minusMinutes(1));
@@ -62,12 +61,34 @@ class ReportServiceTest {
         task.setAssignees(Set.of(reporter));
 
         ReportService service = new ReportService(
-                null, null, null, null, null, null, null, new ObjectMapper(), new AccessControlService(null));
+                null, null, null, null, null, null, null, new ObjectMapper(), new AccessControlService(null), mock(LateFillRequestService.class));
 
         assertThatThrownBy(() -> service.validateTask(task, template, reporter))
                 .isInstanceOf(ApiException.class)
                 .satisfies(error -> org.assertj.core.api.Assertions.assertThat(((ApiException) error).getStatus()).isEqualTo(HttpStatus.BAD_REQUEST))
                 .hasMessageContaining("past its deadline");
+    }
+
+    @Test
+    void reporterMayFillPastDeadlineWithActiveLateFillApproval() {
+        ReportTemplate template = template(1L);
+        ReportTask task = new ReportTask();
+        ReflectionTestUtils.setField(task, "id", 3L);
+        task.setTemplate(template);
+        task.setStatus("PUBLISHED");
+        task.setDeadline(LocalDateTime.now().minusMinutes(1));
+        User reporter = new User();
+        ReflectionTestUtils.setField(reporter, "id", 7L);
+        reporter.setRoles(Set.of(Role.REPORTER));
+        task.setAssignees(Set.of(reporter));
+        LateFillRequestService lateFills = mock(LateFillRequestService.class);
+        when(lateFills.hasActiveWindow(task.getId(), reporter.getId())).thenReturn(true);
+
+        ReportService service = new ReportService(
+                null, null, null, null, null, null, null, new ObjectMapper(), new AccessControlService(null), lateFills);
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> service.validateTask(task, template, reporter))
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -81,7 +102,7 @@ class ReportServiceTest {
         reporter.setRoles(Set.of(Role.REPORTER));
 
         ReportService service = new ReportService(
-                null, null, null, null, null, null, null, new ObjectMapper(), new AccessControlService(null));
+                null, null, null, null, null, null, null, new ObjectMapper(), new AccessControlService(null), mock(LateFillRequestService.class));
 
         assertThatThrownBy(() -> service.validateTask(task, template, reporter))
                 .isInstanceOf(ApiException.class)
@@ -90,7 +111,7 @@ class ReportServiceTest {
     }
 
     @Test
-    void scopedLeaderWithReportEditCanUpdateLateUnassignedSubmittedReport() {
+    void scopedLeaderWithReportEditCannotUpdateSubmittedReport() {
         Department department = department(1L);
         User leader = user(9L, "leader", department, Set.of(Role.LEADER), Set.of(Permission.REPORT_EDIT));
         User reporter = user(7L, "reporter", department, Set.of(Role.REPORTER), Set.of(Permission.REPORT_EDIT));
@@ -128,11 +149,12 @@ class ReportServiceTest {
         when(departments.findAll()).thenReturn(List.of());
 
         ReportService service = new ReportService(records, values, mock(ReportChangeRequestRepository.class), templates,
-                mock(TaskService.class), mock(ReportAuditService.class), currentUsers, new ObjectMapper(), new AccessControlService(departments));
+                mock(TaskService.class), mock(ReportAuditService.class), currentUsers, new ObjectMapper(), new AccessControlService(departments), mock(LateFillRequestService.class));
 
-        assertThatCode(() -> service.update(4L, new ReportDtos.Request(1L, null, 2L, Map.of(), null)))
-                .doesNotThrowAnyException();
-        verify(records).save(record);
+        assertThatThrownBy(() -> service.update(4L, new ReportDtos.Request(1L, null, 2L, Map.of(), null)))
+                .isInstanceOf(ApiException.class)
+                .satisfies(error -> org.assertj.core.api.Assertions.assertThat(((ApiException) error).getStatus()).isEqualTo(HttpStatus.FORBIDDEN))
+                .hasMessageContaining("cannot modify");
     }
 
     private static ReportTemplate template(Long id) {

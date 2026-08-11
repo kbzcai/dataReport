@@ -102,8 +102,7 @@ public class AccessControlService {
             return false;
         }
         return isAdmin(actor)
-                || record.getReporter().getId().equals(actor.getId())
-                || canManageDepartment(actor, record.getReporter().getDepartment(), scope);
+                || record.getReporter().getId().equals(actor.getId());
     }
 
     public boolean isEligibleAssignee(User user) {

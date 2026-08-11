@@ -266,6 +266,25 @@ CREATE TABLE IF NOT EXISTS report_change_request (
   CONSTRAINT fk_change_request_reviewer FOREIGN KEY (reviewer_id) REFERENCES sys_user (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='填报修改申请';
 
+CREATE TABLE IF NOT EXISTS report_late_fill_request (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  task_id BIGINT NOT NULL,
+  requester_id BIGINT NOT NULL,
+  leader_id BIGINT NOT NULL,
+  reason VARCHAR(500) NOT NULL,
+  status VARCHAR(16) NOT NULL,
+  late_deadline DATETIME DEFAULT NULL,
+  review_comment VARCHAR(500) DEFAULT NULL,
+  created_at DATETIME NOT NULL,
+  reviewed_at DATETIME DEFAULT NULL,
+  PRIMARY KEY (id),
+  KEY idx_late_fill_request_task_user (task_id, requester_id),
+  KEY idx_late_fill_request_status (status),
+  CONSTRAINT fk_late_fill_request_task FOREIGN KEY (task_id) REFERENCES report_task (id) ON DELETE CASCADE,
+  CONSTRAINT fk_late_fill_request_requester FOREIGN KEY (requester_id) REFERENCES sys_user (id),
+  CONSTRAINT fk_late_fill_request_leader FOREIGN KEY (leader_id) REFERENCES sys_user (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='逾期补报申请';
+
 CREATE TABLE IF NOT EXISTS report_record_value (
     id BIGINT NOT NULL AUTO_INCREMENT,
     record_id BIGINT NOT NULL,
