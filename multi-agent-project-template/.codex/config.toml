@@ -15,10 +15,3 @@ model_reasoning_summary = "none"
 
 # 6. 复用 shell 环境快照，减少同一任务中重复命令的初始化等待。
 shell_snapshot = true
-
-# 7. L3 仅同时运行 Frontend 与 Backend；子 Agent 不降低推理强度。
-[agents]
-enabled = true
-max_concurrent_threads_per_session = 2
-default_subagent_reasoning_effort = "high"
-interrupt_message = false

@@ -2,7 +2,16 @@
 
 > 通用模板补充规则：本文件后续“项目技术档案与模板同步”章节优先于任何固定 Vue 或 Spring Cloud 默认描述。
 
-除“版本控制快速通道”外，协调 Agent 必须先按“协同分级路由”判断参与角色和验证深度。不得把低风险任务升级为全量协同，也不得把功能、安全或运行时变更降级后直接交付。
+除“版本控制快速通道”外，协调 Agent 必须先读取 `.codex/agent-collaboration.toml` 并按项目内 `agent-collaboration-control` Skill 判断是否允许子 Agent 协作，再按“协同分级路由”判断参与角色和验证深度。状态默认关闭；不得把低风险任务升级为全量协同，也不得把功能、安全或运行时变更降级后直接交付。
+
+## 项目级 Agent 协作开关
+
+- 状态文件是本项目策略，默认 `enabled = false`，并要求 `confirm_before_dispatch = true`；缺失、格式错误或非布尔值分别按关闭和必须确认处理。它不属于 Codex 原生运行时配置，不得写入全局配置或 `.codex/config.toml` 的未知 `[agents]` 表。
+- 用户直接表达“开启/启用/打开/进入 Agent 协作、子代理、多 Agent 模式”等相近肯定意图时，先将状态写为 `enabled = true`；直接表达“关闭/停用/不要使用 Agent 协作、子代理、多 Agent 模式”等相近否定意图时，写为 `enabled = false`。只在引用、假设、文档分析或与当前任务无关的否定语境中出现这些词，不得切换状态。
+- 每次状态变更后回显当前项目状态。状态随项目目录保留，因此同一项目的新对话会读取它，其他项目不会继承它。
+- `enabled = false` 时不自动评估；用户输入“协作评估：...”或同义命令后，主 Agent 才为当前任务执行只读协作判定。`enabled = true` 时每个项目任务自动执行同一判定。
+- 无论状态如何，只要判定结果准备进入 Agent 协作，必须先展示等级、理由、影响矩阵、拟派发角色、并行组、依赖和风险，并询问用户确认。未确认、拒绝或要求主 Agent 处理时，不得创建子 Agent；确认只对当前任务生效，不自动修改状态文件。
+- L0/L1 由主 Agent 直接完成且不需要询问；L2/L3 或命中鉴权、敏感信息、外部调用、数据库、接口契约、运行时配置或共享运行时逻辑时，只有在用户确认后才执行本文件既有 Product、Frontend/Backend、Tester 路由。
 
 ## 角色配置
 
@@ -24,7 +33,7 @@ L1 的 Product 轻量判定卡最多包含：范围、影响矩阵、实施角�
 
 ## 强制调度协议
 
-本节约束协调 Agent 的实际派发行为；角色 TOML 只定义职责，不能替代运行时的子 Agent 调度。
+本节约束协调 Agent 的实际派发行为；项目策略允许评估（`enabled = true`，或 `enabled = false` 但当前任务有明确评估触发）、评估结果适合协作和用户确认三项条件同时满足后才允许实际派发。角色 TOML 只定义职责，不能替代运行时的子 Agent 调度。
 
 1. Product Agent 必须先输出固定影响矩阵，并为每项给出一句理由：
 
@@ -126,9 +135,11 @@ Product 必须在影响矩阵中声明 `runtime_behavior_changed`、`restart_fro
 
 - `AGENTS.md`
 - `.codex/config.toml`
+- `.codex/agent-collaboration.toml`
+- `.codex/skills/agent-collaboration-control/SKILL.md`
 - `.codex/agents/*.toml`
 
-仅维护本仓库内 `multi-agent-project-template` 模板副本时，可运行 `multi-agent-project-template/sync-from-project.ps1` 直接同步 `AGENTS.md`、`.codex/config.toml` 与五个角色 TOML。用户已确认模板默认采用 `approval_policy = "never"` 与 `sandbox_mode = "danger-full-access"`；`.codex/config.toml` 仍不得包含模型、提供方、代理、Token、凭据、测试账号、数据库连接或生产地址。不得同步 `TEST_ACCOUNTS.md`、`.env`、本地数据库配置、`PROJECT_PROFILE.md` 或其他包含凭据的 Markdown/TOML 文件。
+仅维护本仓库内 `multi-agent-project-template` 模板副本时，可运行 `multi-agent-project-template/sync-from-project.ps1` 直接同步规则、项目配置、协作状态、Skill 与五个角色 TOML。用户已确认模板默认采用 `approval_policy = "never"` 与 `sandbox_mode = "danger-full-access"`；`.codex/config.toml` 仍不得包含模型、提供方、代理、Token、凭据、测试账号、数据库连接或生产地址。不得同步 `TEST_ACCOUNTS.md`、`.env`、本地数据库配置、`PROJECT_PROFILE.md` 或其他包含凭据的 Markdown/TOML 文件。
 
 ## 项目技术档案与模板同步
 

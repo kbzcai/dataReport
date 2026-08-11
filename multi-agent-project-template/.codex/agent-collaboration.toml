@@ -1,0 +1,6 @@
+# Project-local coordination policy. This is read by AGENTS.md and the project Skill.
+# false: evaluate only when the user explicitly asks for collaboration assessment.
+# true: evaluate every project task automatically.
+enabled = false
+# Never dispatch a child Agent without a fresh confirmation for the current task.
+confirm_before_dispatch = true

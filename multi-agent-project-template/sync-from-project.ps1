@@ -2,6 +2,8 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $relativeFiles = @(
     'AGENTS.md',
     '.codex\config.toml',
+    '.codex\agent-collaboration.toml',
+    '.codex\skills\agent-collaboration-control\SKILL.md',
     '.codex\agents\product.toml',
     '.codex\agents\frontend.toml',
     '.codex\agents\backend.toml',

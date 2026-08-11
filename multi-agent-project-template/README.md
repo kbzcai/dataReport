@@ -1,6 +1,6 @@
-# Codex multi-agent project template
+# Codex 多 Agent 项目模板
 
-This directory is a reusable project-local Codex configuration for Java projects. Copy `AGENTS.md`, `.codex`, and the example `PROJECT_PROFILE.md` into a target project, then complete the profile using that project's actual layout and commands.
+本目录提供可复制到新项目的 Codex 协作规则、角色定义和项目级配置。适用于已授权的本地开发项目；不得把密码、Token、生产地址或代理配置写入模板。
 
 ```text
 target-project/
@@ -8,33 +8,27 @@ target-project/
 |-- PROJECT_PROFILE.md
 `-- .codex/
     |-- config.toml
-    `-- agents/
-        |-- product.toml
-        |-- frontend.toml
-        |-- backend.toml
-        |-- tester.toml
-        `-- repoops.toml
+    |-- agent-collaboration.toml
+    |-- agents/
+    `-- skills/agent-collaboration-control/SKILL.md
 ```
 
-`PROJECT_PROFILE.md` is project-specific. It declares the existing backend framework, build tool, module paths, optional frontend stack, database, and ordinary test command. It must never contain credentials or environment-specific endpoints. If it is absent or incomplete, roles detect the stack from the repository instead of treating the template defaults as facts.
+## 使用
 
-The routing levels keep normal requests efficient:
+1. 将 `AGENTS.md`、`.codex/` 和 `PROJECT_PROFILE.md` 复制到目标项目根目录。
+2. 按目标项目实际技术栈、模块路径和测试命令填写 `PROJECT_PROFILE.md`。该文件不得包含凭据；字段不完整时，角色必须先探测项目，不能假定 Spring Boot、Vue 或目录结构。
+3. 默认 `enabled = false`。需要评估某个任务时，输入：`协作评估：<任务描述>`。
+4. 若任务适合协作，协调 Agent 会先展示等级、角色、依赖和风险；只有获得你的明确确认后才派发子 Agent。拒绝或未确认时由主 Agent 处理。
+5. 将 `enabled = true` 后，每个项目任务都会自动评估；实际派发前仍必须确认。
 
-- `L0`: general questions that do not read project files, handled directly.
-- `L1`: documentation, Agent configuration, and non-runtime project work; Product performs a compact scope check, while Tester is added only for security or rule-risk work.
-- `L2`: a single affected application side; Product, the affected implementation role, then Tester.
-- `L3`: cross-side, API-contract, database-schema, permission, or shared-runtime changes; Product, actual parallel implementation where independent, then Tester.
+`L0/L1` 任务由主 Agent 处理；`L2/L3` 任务在确认后按 `AGENTS.md` 的 Product、实施角色和 Tester 流程执行。详细的权限、并行和审计规则以 `AGENTS.md` 为准。
 
-For an independent L3 change, the coordinator creates `Frontend` and `Backend` in the same dispatch stage after Product finishes. A returned Agent ID proves dispatch; a naturally visible “started working”, `running`, progress update, file change, or “completed” result proves that the Agent worked. Same-stage dispatch without waiting for either result is “parallel dispatch”. Only naturally overlapping visible working states may be labelled “running in parallel”. Do not create probes or poll repeatedly just to capture an overlapping `running` state. The final delivery records each Agent ID, visible state, owned directories, shared Product contract, and the later Tester review.
+## 同步
 
-Synchronize reusable rules from this project with:
+在模板目录执行以下命令，可从当前项目同步规则、`.codex/config.toml`、协作策略、Skill 和角色文件：
 
 ```powershell
 .\sync-from-project.ps1
 ```
 
-The default command copies `AGENTS.md` and role files only. It deliberately does not copy `PROJECT_PROFILE.md` or `.codex/config.toml`, which are normally project- or machine-specific. Copy the configuration only after manually confirming that it has no local network, model, proxy, or credential settings:
-
-```powershell
-.\sync-from-project.ps1 -IncludeConfig
-```
+脚本不会覆盖 `PROJECT_PROFILE.md`，避免将一个项目的技术事实误带入另一个项目。
